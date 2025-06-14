@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, Slot, QSettings, QUrl
 from PySide6.QtGui import QDesktopServices
+from src.gui.theme_manager import theme_manager
 
 from src.core.database import LeadDatabase
 from src.core.export import LeadExporter
@@ -152,6 +153,16 @@ class ReportView(QWidget):
         self.tab_widget.addTab(self.preview_tab, "Preview")
         
         main_layout.addWidget(self.tab_widget)
+        
+        # Apply theme styling
+        self.setStyleSheet(theme_manager.get_stylesheet())
+        
+        # Connect to theme changes
+        theme_manager.theme_changed.connect(self.apply_theme)
+    
+    def apply_theme(self):
+        """Apply the current theme"""
+        self.setStyleSheet(theme_manager.get_stylesheet())
     
     def load_settings(self):
         """Load saved settings"""

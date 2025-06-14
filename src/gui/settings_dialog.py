@@ -5,11 +5,16 @@ Settings dialog
 import os
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QLineEdit, QSpinBox, QCheckBox, 
-    QPushButton, QTabWidget, QGroupBox, QWidget,  # Added QWidget here
-    QFileDialog, QMessageBox, QComboBox
+    QTabWidget, QWidget, QGroupBox, QLineEdit, QPushButton,
+    QCheckBox, QSpinBox, QComboBox, QFileDialog, QMessageBox,
+    QTextEdit, QLabel
 )
 from PySide6.QtCore import Qt, QSettings
+from PySide6.QtGui import QFont
+
+from src.gui.theme_manager import theme_manager
+from src.utils.config import Config
+from src.core.database import LeadDatabase
 
 class SettingsDialog(QDialog):
     """Settings dialog for the application"""
@@ -23,11 +28,24 @@ class SettingsDialog(QDialog):
         # Load settings
         self.settings = QSettings("UK Business Lead Generator", "LeadGen")
         
+        # Apply theme styling
+        self.setStyleSheet(theme_manager.get_stylesheet())
+        
+        # Connect to theme changes
+        theme_manager.theme_changed.connect(self.apply_theme)
+        
         # Set up UI
         self.setup_ui()
         
         # Load current settings
         self.load_settings()
+        
+        # Apply theme
+        self.apply_theme()
+    
+    def apply_theme(self):
+        """Apply current theme to dialog"""
+        self.setStyleSheet(theme_manager.get_stylesheet())
     
     def setup_ui(self):
         """Set up the user interface"""
@@ -170,10 +188,52 @@ class SettingsDialog(QDialog):
         # Add stretch
         export_layout.addStretch()
         
+        # Data Management tab
+        data_mgmt_tab = QWidget()
+        data_mgmt_layout = QVBoxLayout(data_mgmt_tab)
+        
+        # Clear Data section
+        clear_data_group = QGroupBox("Data Management")
+        clear_data_layout = QVBoxLayout(clear_data_group)
+        
+        clear_data_info = QLabel("Warning: This will permanently delete all stored business data, search results, and contact attempts.")
+        clear_data_info.setWordWrap(True)
+        clear_data_info.setStyleSheet("color: #dc3545; font-weight: bold; padding: 10px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px;")
+        clear_data_layout.addWidget(clear_data_info)
+        
+        self.clear_data_button = QPushButton("🗑️ Clear All Data")
+        self.clear_data_button.setStyleSheet("QPushButton { background-color: #dc3545; color: white; font-weight: bold; padding: 10px; border-radius: 6px; } QPushButton:hover { background-color: #c82333; }")
+        self.clear_data_button.clicked.connect(self.on_clear_data_clicked)
+        clear_data_layout.addWidget(self.clear_data_button)
+        
+        data_mgmt_layout.addWidget(clear_data_group)
+        
+        # Business Types section
+        business_types_group = QGroupBox("Custom Business Types")
+        business_types_layout = QVBoxLayout(business_types_group)
+        
+        business_types_info = QLabel("Add custom business types to search for (one per line):")
+        business_types_layout.addWidget(business_types_info)
+        
+        self.business_types_edit = QTextEdit()
+        self.business_types_edit.setMaximumHeight(150)
+        self.business_types_edit.setPlaceholderText("e.g.:\nCoffee Shops\nDigital Marketing Agencies\nLocal Restaurants\nFitness Centers")
+        business_types_layout.addWidget(self.business_types_edit)
+        
+        business_types_note = QLabel("Note: These will appear in the business type dropdown when searching.")
+        business_types_note.setStyleSheet("color: #6c757d; font-style: italic;")
+        business_types_layout.addWidget(business_types_note)
+        
+        data_mgmt_layout.addWidget(business_types_group)
+        
+        # Add stretch
+        data_mgmt_layout.addStretch()
+        
         # Add tabs to tab widget
         tab_widget.addTab(general_tab, "General")
         tab_widget.addTab(analysis_tab, "Analysis")
         tab_widget.addTab(export_tab, "Export")
+        tab_widget.addTab(data_mgmt_tab, "Data Management")
         
         main_layout.addWidget(tab_widget)
         
@@ -250,6 +310,10 @@ class SettingsDialog(QDialog):
             os.path.join(os.path.expanduser("~"), "UKLeadGen", "exports")
         )
         self.export_path_edit.setText(export_path)
+        
+        # Business types
+        business_types = self.settings.value("search/custom_business_types", "")
+        self.business_types_edit.setPlainText(business_types)
     
     def save_settings(self):
         """Save settings values"""
@@ -272,6 +336,9 @@ class SettingsDialog(QDialog):
         # Export settings
         self.settings.setValue("export/default_format", self.export_format_combo.currentText())
         self.settings.setValue("export/default_path", self.export_path_edit.text())
+        
+        # Business types
+        self.settings.setValue("search/custom_business_types", self.business_types_edit.toPlainText())
     
     def accept(self):
         """Handle accept (save) button click"""
@@ -315,3 +382,59 @@ class SettingsDialog(QDialog):
         
         if folder:
             self.export_path_edit.setText(folder)
+    
+    def on_clear_data_clicked(self):
+        """Handle clear data button click"""
+        reply = QMessageBox.question(
+            self, 
+            "Clear All Data",
+            "Are you sure you want to permanently delete all stored business data?\n\n"
+            "This action cannot be undone and will remove:\n"
+            "• All business search results\n"
+            "• Website analysis data\n"
+            "• Contact attempt records\n\n"
+            "Do you want to continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # Get data folder path
+                data_folder = self.data_folder_edit.text()
+                if not data_folder:
+                    data_folder = os.path.join(os.path.expanduser("~"), "UKLeadGen", "data")
+                
+                # Find and clear all database files
+                import glob
+                db_files = glob.glob(os.path.join(data_folder, "*.db"))
+                
+                cleared_count = 0
+                for db_file in db_files:
+                    try:
+                        db = LeadDatabase(db_file)
+                        if db.clear_all_data():
+                            cleared_count += 1
+                        db.close()
+                    except Exception as e:
+                        print(f"Error clearing {db_file}: {e}")
+                
+                if cleared_count > 0:
+                    QMessageBox.information(
+                        self,
+                        "Data Cleared",
+                        f"Successfully cleared data from {cleared_count} database(s)."
+                    )
+                else:
+                    QMessageBox.information(
+                        self,
+                        "No Data Found",
+                        "No database files found to clear."
+                    )
+                    
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"An error occurred while clearing data:\n{str(e)}"
+                )

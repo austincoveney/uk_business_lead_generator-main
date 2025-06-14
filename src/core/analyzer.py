@@ -8,7 +8,9 @@ import time
 import tempfile
 import subprocess
 import requests
+import re
 from urllib.parse import urlparse
+from bs4 import BeautifulSoup
 
 
 class WebsiteAnalyzer:
@@ -27,11 +29,65 @@ class WebsiteAnalyzer:
         )
 
     def _check_lighthouse(self):
-        """Check if Lighthouse is available via Chrome"""
+        """Check if Lighthouse dependencies are available"""
         try:
-            # First, try to check for Chrome with DevTools protocol capability
+            # First check if Node.js is installed
+            try:
+                node_version = subprocess.run(
+                    ["node", "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if node_version.returncode != 0:
+                    print("Node.js not found, installing Lighthouse not possible")
+                    return False
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
+                print("Node.js not found, installing Lighthouse not possible")
+                return False
+
+            # Then check if npm is installed
+            try:
+                npm_version = subprocess.run(
+                    ["npm", "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if npm_version.returncode != 0:
+                    print("npm not found, installing Lighthouse not possible")
+                    return False
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
+                print("npm not found, installing Lighthouse not possible")
+                return False
+
+            # Check if Lighthouse is installed globally
+            try:
+                lighthouse_version = subprocess.run(
+                    ["lighthouse", "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if lighthouse_version.returncode != 0:
+                    # Try to install Lighthouse globally
+                    print("Lighthouse not found, attempting to install...")
+                    install_result = subprocess.run(
+                        ["npm", "install", "-g", "lighthouse"],
+                        capture_output=True,
+                        text=True,
+                        timeout=300
+                    )
+                    if install_result.returncode != 0:
+                        print("Failed to install Lighthouse")
+                        return False
+                    print("Lighthouse installed successfully")
+            except Exception as e:
+                print(f"Error checking/installing Lighthouse: {e}")
+                return False
+
+            # Check for Chrome
             chrome_paths = [
-                # Windows
                 os.path.join(
                     os.environ.get("PROGRAMFILES", "C:\\Program Files"),
                     "Google\\Chrome\\Application\\chrome.exe",
@@ -39,32 +95,23 @@ class WebsiteAnalyzer:
                 os.path.join(
                     os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"),
                     "Google\\Chrome\\Application\\chrome.exe",
-                ),
-                # macOS
-                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                # Linux
-                "/usr/bin/google-chrome",
-                "/usr/bin/chrome",
-                "/usr/bin/chromium",
-                "/usr/bin/chromium-browser",
+                )
             ]
 
             chrome_found = False
             for path in chrome_paths:
                 if os.path.exists(path):
                     chrome_found = True
+                    print(f"Chrome found at: {path}")
                     break
 
-            if chrome_found:
-                print("Chrome browser found, can use DevTools Protocol for Lighthouse")
-                return True
+            if not chrome_found:
+                print("Chrome not found, Lighthouse will use bundled Chromium")
 
-            # Fall back to checking for standalone Lighthouse
-            result = subprocess.run(
-                ["lighthouse", "--version"], capture_output=True, text=True, timeout=10
-            )
-            return result.returncode == 0
-        except:
+            return True
+
+        except Exception as e:
+            print(f"Error during Lighthouse setup: {e}")
             return False
 
     def analyze_website(self, url):
@@ -102,13 +149,27 @@ class WebsiteAnalyzer:
 
         # If Lighthouse is available, run it
         if self.lighthouse_available:
+            print(f"Running Lighthouse analysis for {url}")
             lighthouse_results = self._run_lighthouse(url)
             if lighthouse_results:
                 self._process_lighthouse_results(lighthouse_results, results)
+                print(f"Lighthouse analysis completed for {url}")
+            else:
+                print(f"Lighthouse failed for {url}, falling back to basic analysis")
+                self._perform_basic_analysis(url, results)
         else:
+            print(f"Lighthouse not available, using basic analysis for {url}")
             results["issues"].append("Lighthouse not available for detailed analysis")
             # Perform basic web checks as fallback
             self._perform_basic_analysis(url, results)
+        
+        # Debug: Print final scores
+        print(f"Analysis results for {url}:")
+        print(f"  Performance: {results['performance_score']}")
+        print(f"  SEO: {results['seo_score']}")
+        print(f"  Accessibility: {results['accessibility_score']}")
+        print(f"  Best Practices: {results['best_practices_score']}")
+        print(f"  Issues: {len(results['issues'])} found")
 
         # Set the priority based on results
         results["priority"] = self._calculate_priority(results)
@@ -116,187 +177,230 @@ class WebsiteAnalyzer:
         return results
 
     def _check_website_basics(self, url, results):
-        """Check basic website properties"""
+        """Check basic website properties and capture screenshot"""
         try:
+            # Initialize additional metrics
+            results.update({
+                "has_ssl": False,
+                "has_mobile_viewport": False,
+                "has_meta_description": False,
+                "has_sitemap": False,
+                "has_robots_txt": False,
+                "load_time": None,
+                "page_size": None,
+                "screenshot": None,
+                "meta_tags": {},
+                "social_media_presence": []
+            })
+
             # Check for SSL (https)
             results["has_ssl"] = url.startswith("https://")
             if not results["has_ssl"]:
                 results["issues"].append("Website does not use SSL (https)")
+                self._check_https_availability(url, results)
 
-                # Try checking if HTTPS is available
-                https_url = (
-                    "https://" + url[7:]
-                    if url.startswith("http://")
-                    else "https://" + url
-                )
-                try:
-                    response = requests.head(
-                        https_url, timeout=10, allow_redirects=True
-                    )
-                    if response.status_code < 400:
-                        results["issues"].append(
-                            "HTTPS is available but not used by default"
-                        )
-                except:
-                    pass
-
-            # Try to get the webpage
+            # Measure load time and get webpage
+            start_time = time.time()
             response = requests.get(url, timeout=10)
+            load_time = time.time() - start_time
+            results["load_time"] = round(load_time, 2)
 
-            # Check for success
+            if load_time > 3:
+                results["issues"].append(f"Slow load time: {load_time:.2f} seconds")
+
+            # Check response status
             if response.status_code >= 400:
-                results["issues"].append(
-                    f"Website returns HTTP status {response.status_code}"
-                )
+                results["issues"].append(f"Website returns HTTP status {response.status_code}")
                 return
 
-            # Check for redirect to another domain
-            if urlparse(response.url).netloc != urlparse(url).netloc:
-                results["issues"].append(f"Website redirects to {response.url}")
+            # Check for redirects
+            final_url = response.url
+            if urlparse(final_url).netloc != urlparse(url).netloc:
+                results["issues"].append(f"Website redirects to {final_url}")
 
-            # Check for mobile viewport meta tag
-            if "viewport" in response.text.lower():
-                results["has_mobile_viewport"] = True
-            else:
-                results["issues"].append("No mobile viewport meta tag found")
+            # Parse HTML content
+            soup = BeautifulSoup(response.text, 'lxml')
 
-            # Check page size
-            page_size_kb = len(response.content) / 1024
-            if page_size_kb > 5000:
-                results["issues"].append(f"Page size is large ({page_size_kb:.1f} KB)")
+            # Check meta tags
+            self._check_meta_tags(soup, results)
+
+            # Check page size and content
+            self._check_page_content(response, results)
+
+            # Check for sitemap and robots.txt
+            self._check_site_files(url, results)
+
+            # Check social media presence
+            self._check_social_media(soup, results)
+
+            # Capture screenshot if using Selenium
+            if self.use_lighthouse and hasattr(self, 'driver'):
+                self._capture_screenshot(url, results)
 
         except requests.RequestException as e:
             results["issues"].append(f"Error accessing website: {str(e)}")
         except Exception as e:
             results["issues"].append(f"Error during basic analysis: {str(e)}")
+            # Provide fallback scores even if analysis fails
+            if results["performance_score"] == 0:
+                results["performance_score"] = 50
+            if results["seo_score"] == 0:
+                results["seo_score"] = 50
+            if results["accessibility_score"] == 0:
+                results["accessibility_score"] = 50
+            if results["best_practices_score"] == 0:
+                results["best_practices_score"] = 50
+
+    def _check_https_availability(self, url, results):
+        """Check if HTTPS is available but not used"""
+        try:
+            https_url = "https://" + url[7:] if url.startswith("http://") else "https://" + url
+            response = requests.head(https_url, timeout=10, allow_redirects=True)
+            if response.status_code < 400:
+                results["issues"].append("HTTPS is available but not used by default")
+        except (requests.RequestException, requests.Timeout):
+            pass
+
+    def _check_meta_tags(self, soup, results):
+        """Check meta tags and SEO elements"""
+        # Check viewport
+        viewport = soup.find('meta', {'name': 'viewport'})
+        results["has_mobile_viewport"] = bool(viewport)
+        if not results["has_mobile_viewport"]:
+            results["issues"].append("No mobile viewport meta tag found")
+
+        # Check meta description
+        meta_desc = soup.find('meta', {'name': 'description'})
+        results["has_meta_description"] = bool(meta_desc)
+        if meta_desc:
+            desc_content = meta_desc.get('content', '')
+            if len(desc_content) < 50 or len(desc_content) > 160:
+                results["issues"].append("Meta description length is not optimal")
+
+        # Store important meta tags
+        for meta in soup.find_all('meta'):
+            name = meta.get('name', meta.get('property', ''))
+            content = meta.get('content', '')
+            if name and content:
+                results["meta_tags"][name] = content
+
+    def _check_page_content(self, response, results):
+        """Analyze page content and structure"""
+        # Check page size
+        page_size_kb = len(response.content) / 1024
+        results["page_size"] = round(page_size_kb, 2)
+        if page_size_kb > 5000:
+            results["issues"].append(f"Page size is large ({page_size_kb:.1f} KB)")
+
+        # Parse content
+        soup = BeautifulSoup(response.text, 'lxml')
+
+        # Check heading structure
+        headings = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+        if not soup.find('h1'):
+            results["issues"].append("Missing H1 heading")
+        elif len(soup.find_all('h1')) > 1:
+            results["issues"].append("Multiple H1 headings found")
+
+    def _check_site_files(self, url, results):
+        """Check for sitemap.xml and robots.txt"""
+        base_url = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
+        
+        try:
+            robots_response = requests.get(f"{base_url}/robots.txt", timeout=5)
+            results["has_robots_txt"] = robots_response.status_code == 200
+
+            sitemap_response = requests.get(f"{base_url}/sitemap.xml", timeout=5)
+            results["has_sitemap"] = sitemap_response.status_code == 200
+        except (requests.RequestException, requests.Timeout):
+            pass
+
+    def _check_social_media(self, soup, results):
+        """Check for social media presence"""
+        social_patterns = {
+            'facebook': r'facebook\.com',
+            'twitter': r'twitter\.com|x\.com',
+            'linkedin': r'linkedin\.com',
+            'instagram': r'instagram\.com'
+        }
+
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            for platform, pattern in social_patterns.items():
+                if re.search(pattern, href) and platform not in results["social_media_presence"]:
+                    results["social_media_presence"].append(platform)
+
+    def _capture_screenshot(self, url, results):
+        """Capture website screenshot using Selenium"""
+        try:
+            self.driver.get(url)
+            time.sleep(2)  # Wait for page to load
+            screenshot = self.driver.get_screenshot_as_base64()
+            results["screenshot"] = screenshot
+        except Exception as e:
+            results["issues"].append(f"Failed to capture screenshot: {str(e)}")
 
     def _run_lighthouse(self, url):
-        """Run Lighthouse analysis on a website"""
+        """Run Lighthouse analysis on a website using globally installed Lighthouse"""
         # Create a temporary file for the output
         fd, output_path = tempfile.mkstemp(suffix=".json")
         os.close(fd)
 
         try:
-            # Determine if we can use Chrome's DevTools Protocol for Lighthouse
-            chrome_found = False
-            chrome_paths = [
-                # Windows
-                os.path.join(
-                    os.environ.get("PROGRAMFILES", "C:\\Program Files"),
-                    "Google\\Chrome\\Application\\chrome.exe",
-                ),
-                os.path.join(
-                    os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"),
-                    "Google\\Chrome\\Application\\chrome.exe",
-                ),
-                # macOS
-                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                # Linux
-                "/usr/bin/google-chrome",
-                "/usr/bin/chrome",
-                "/usr/bin/chromium",
-                "/usr/bin/chromium-browser",
+            # Run Lighthouse with minimal output categories and use bundled Chromium
+            lighthouse_command = [
+                "lighthouse",
+                url,
+                "--chrome-flags=--headless --no-sandbox --disable-gpu",
+                "--output=json",
+                "--output-path=" + output_path,
+                "--only-categories=performance,accessibility,best-practices,seo",
+                "--quiet",
+                "--form-factor=desktop",  # Force desktop analysis
+                "--throttling.cpuSlowdownMultiplier=2",  # Reduce CPU throttling
+                "--max-wait-for-load=30000"  # 30 second page load timeout
             ]
 
-            chrome_path = None
-            for path in chrome_paths:
-                if os.path.exists(path):
-                    chrome_path = path
-                    chrome_found = True
-                    break
+            # Run the command with a timeout
+            process = subprocess.run(
+                lighthouse_command,
+                capture_output=True,
+                text=True,
+                timeout=60  # 60 second total timeout
+            )
 
-            if chrome_found:
-                print(f"Using Chrome at {chrome_path} for Lighthouse analysis")
-                # Use Chrome with DevTools Protocol
-                lighthouse_command = [
-                    chrome_path,
-                    "--headless",
-                    "--disable-gpu",
-                    "--remote-debugging-port=9222",
-                    "--enable-automation",
-                    "--no-sandbox",
-                    f"--user-data-dir={tempfile.mkdtemp()}",
-                    f"--dump-dom={url}",
-                    "--run-lighthouse",
-                ]
-
-                try:
-                    # Start Chrome with DevTools Protocol
-                    chrome_process = subprocess.Popen(
-                        lighthouse_command,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                    )
-
-                    # Wait a moment for Chrome to start
-                    time.sleep(5)
-
-                    # Run Lighthouse via npx
-                    lighthouse_npx_command = [
-                        "npx",
-                        "lighthouse",
-                        url,
-                        "--output=json",
-                        f"--output-path={output_path}",
-                        "--chrome-flags=--headless",
-                        "--only-categories=performance,accessibility,best-practices,seo",
-                    ]
-
-                    subprocess.run(lighthouse_npx_command, timeout=60, check=False)
-
-                    # Kill the Chrome process
-                    try:
-                        chrome_process.terminate()
-                    except:
-                        pass
-
-                except Exception as e:
-                    print(f"Error using Chrome DevTools for Lighthouse: {e}")
-                    # Fall back to standalone Lighthouse
-                    pass
-
-            # If we don't have Chrome or the Chrome approach failed, try standalone Lighthouse
-            if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-                print("Falling back to standalone Lighthouse")
-                # Run Lighthouse with minimal output categories
-                lighthouse_command = [
-                    "lighthouse",
-                    url,
-                    "--chrome-flags=--headless --no-sandbox --disable-gpu",
-                    "--output=json",
-                    "--output-path=" + output_path,
-                    "--only-categories=performance,accessibility,best-practices,seo",
-                    "--quiet",
-                ]
-
-                # Run the command with a timeout
-                subprocess.run(
-                    lighthouse_command,
-                    capture_output=True,
-                    timeout=60,  # 60 second timeout
-                )
+            if process.returncode != 0:
+                print(f"Lighthouse command failed with error: {process.stderr}")
+                return None
 
             # Check if the output file exists and has content
             if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                # Read and parse the JSON output
-                with open(output_path, "r") as f:
-                    lighthouse_data = json.load(f)
-
-                return lighthouse_data
+                try:
+                    # Read and parse the JSON output
+                    with open(output_path, "r", encoding='utf-8') as f:
+                        lighthouse_data = json.load(f)
+                    return lighthouse_data
+                except json.JSONDecodeError as e:
+                    print(f"Error parsing Lighthouse output: {e}")
+                    return None
             else:
                 print("Lighthouse didn't generate output")
                 return None
 
         except subprocess.TimeoutExpired:
-            print("Lighthouse timed out")
+            print("Lighthouse analysis timed out")
             return None
         except Exception as e:
             print(f"Error running Lighthouse: {e}")
             return None
         finally:
             # Clean up the temporary file
-            if os.path.exists(output_path):
-                os.unlink(output_path)
+            try:
+                if os.path.exists(output_path):
+                    os.unlink(output_path)
+            except Exception as e:
+                print(f"Error cleaning up temporary file: {e}")
+
 
     def _process_lighthouse_results(self, lighthouse_data, results):
         """Process Lighthouse results into our format"""
@@ -408,81 +512,97 @@ class WebsiteAnalyzer:
             # Check response headers
             headers = response.headers
 
-            # Performance checks
+            # Performance checks - Start with a good baseline
+            performance_score = 75
             if len(response.content) > 1000000:  # 1MB
                 results["issues"].append("Large page size")
-                results["performance_score"] = 50
-            else:
-                results["performance_score"] = 70
+                performance_score -= 25
+            if results.get("load_time", 0) > 3:
+                performance_score -= 15
+            if results.get("load_time", 0) > 5:
+                performance_score -= 15
+            results["performance_score"] = max(30, performance_score)
 
-            # SEO checks
-            results["seo_score"] = 60  # Default
+            # SEO checks - Start with a good baseline
+            seo_score = 75
 
             # Check for title
             if "<title>" not in html or "<title></title>" in html:
                 results["issues"].append("Missing page title")
-                results["seo_score"] = max(30, results["seo_score"] - 30)
-
+                seo_score -= 25
+            
             # Check for meta description
             if 'meta name="description"' not in html and "meta content=" not in html:
                 results["issues"].append("Missing meta description")
-                results["seo_score"] = max(30, results["seo_score"] - 20)
-
+                seo_score -= 20
+            
             # Check for heading structure
             if "<h1" not in html:
                 results["issues"].append("Missing H1 heading")
-                results["seo_score"] = max(30, results["seo_score"] - 15)
-
+                seo_score -= 15
+            
             # Check for image alt text
             img_tags = html.count("<img")
             alt_attributes = html.count("alt=")
             if img_tags > 0 and alt_attributes < img_tags:
                 results["issues"].append("Some images missing alt text")
-                results["seo_score"] = max(30, results["seo_score"] - 10)
-
+                seo_score -= 10
+            
             # Check for robots meta tag that blocks indexing
             if 'meta name="robots" content="noindex' in html:
                 results["issues"].append(
                     "Page set to noindex - will not appear in search results"
                 )
-                results["seo_score"] = max(20, results["seo_score"] - 40)
+                seo_score -= 30
+            
+            # Check for SSL
+            if not results.get("has_ssl", False):
+                seo_score -= 15
+            
+            results["seo_score"] = max(25, seo_score)
 
-            # Accessibility checks
-            results["accessibility_score"] = 50  # Default
-
+            # Accessibility checks - Start with a good baseline
+            accessibility_score = 70
+            
             # Check for alt text on images
             if "<img " in html and (' alt="' not in html or " alt=" not in html):
                 results["issues"].append("Images may be missing alt text")
-                results["accessibility_score"] = max(
-                    30, results["accessibility_score"] - 20
-                )
-
+                accessibility_score -= 20
+            
             # Check for form labels
             if "<form" in html and "<label" not in html:
                 results["issues"].append("Forms may be missing labels")
-                results["accessibility_score"] = max(
-                    30, results["accessibility_score"] - 15
-                )
+                accessibility_score -= 15
+            
+            # Check for proper heading hierarchy
+            if "<h1" in html and "<h2" in html:
+                accessibility_score += 5  # Bonus for good structure
+            
+            results["accessibility_score"] = max(30, accessibility_score)
 
-            # Best practices checks
-            results["best_practices_score"] = 60  # Default
-
+            # Best practices checks - Start with a good baseline
+            best_practices_score = 70
+            
+            # Check for HTTPS
+            if results.get("has_ssl", False):
+                best_practices_score += 10
+            else:
+                best_practices_score -= 20
+            
             # Check for basic security headers
             security_headers = [
                 "Strict-Transport-Security",
-                "Content-Security-Policy",
+                "Content-Security-Policy", 
                 "X-Content-Type-Options",
             ]
             missing_headers = [h for h in security_headers if h not in headers]
-
+            
             if missing_headers:
                 results["issues"].append(
                     f"Missing security headers: {', '.join(missing_headers)}"
                 )
-                results["best_practices_score"] = max(
-                    30, results["best_practices_score"] - (len(missing_headers) * 10)
-                )
-
+                best_practices_score -= (len(missing_headers) * 8)
+            
             # Check for JavaScript libraries with known vulnerabilities
             risky_js_libs = ["jquery-1.", "jquery-2.0", "angular.js@1.", "bootstrap-2"]
             for risky_lib in risky_js_libs:
@@ -490,10 +610,14 @@ class WebsiteAnalyzer:
                     results["issues"].append(
                         f"Using potentially outdated library: {risky_lib}"
                     )
-                    results["best_practices_score"] = max(
-                        30, results["best_practices_score"] - 15
-                    )
+                    best_practices_score -= 15
                     break
+            
+            # Check for proper doctype
+            if "<!doctype html>" in html or "<!DOCTYPE html>" in response.text:
+                best_practices_score += 5
+            
+            results["best_practices_score"] = max(25, best_practices_score)
 
         except Exception as e:
             results["issues"].append(f"Error during basic analysis: {str(e)}")

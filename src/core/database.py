@@ -49,7 +49,15 @@ class LeadDatabase:
                 priority INTEGER DEFAULT 0,
                 notes TEXT,
                 discovered_date TEXT,
-                last_updated TEXT
+                last_updated TEXT,
+                social_media TEXT,  -- Stored as JSON
+                opening_hours TEXT,
+                description TEXT,
+                keywords TEXT,  -- Stored as JSON
+                company_number TEXT,
+                vat_number TEXT,
+                contact_completeness INTEGER DEFAULT 0,
+                address_verified BOOLEAN DEFAULT 1
             )
             ''')
             
@@ -107,8 +115,10 @@ class LeadDatabase:
             cursor.execute('''
             INSERT INTO businesses (
                 name, address, city, postal_code, phone, email, website, 
-                business_type, priority, notes, discovered_date, last_updated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                business_type, priority, notes, discovered_date, last_updated,
+                social_media, opening_hours, description, keywords,
+                company_number, vat_number, contact_completeness, address_verified
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 business_data.get('name', ''),
                 business_data.get('address', ''),
@@ -121,7 +131,15 @@ class LeadDatabase:
                 business_data.get('priority', 0),
                 business_data.get('notes', ''),
                 now,
-                now
+                now,
+                json.dumps(business_data.get('social_media', {})),
+                business_data.get('opening_hours', ''),
+                business_data.get('description', ''),
+                json.dumps(business_data.get('keywords', [])),
+                business_data.get('company_number', ''),
+                business_data.get('vat_number', ''),
+                business_data.get('contact_completeness', 0),
+                business_data.get('address_verified', True)
             ))
             
             business_id = cursor.lastrowid
@@ -196,8 +214,20 @@ class LeadDatabase:
             if business.get('issues'):
                 try:
                     business['issues'] = json.loads(business['issues'])
-                except:
+                except (json.JSONDecodeError, TypeError):
                     business['issues'] = []
+            
+            if business.get('social_media'):
+                try:
+                    business['social_media'] = json.loads(business['social_media'])
+                except (json.JSONDecodeError, TypeError):
+                    business['social_media'] = {}
+            
+            if business.get('keywords'):
+                try:
+                    business['keywords'] = json.loads(business['keywords'])
+                except (json.JSONDecodeError, TypeError):
+                    business['keywords'] = []
             
             return business
             
@@ -252,7 +282,31 @@ class LeadDatabase:
             
             cursor.execute(query, params)
             
-            businesses = [dict(row) for row in cursor.fetchall()]
+            businesses = []
+            for row in cursor.fetchall():
+                business = dict(row)
+                
+                # Parse JSON fields
+                if business.get('social_media'):
+                    try:
+                        business['social_media'] = json.loads(business['social_media'])
+                    except (json.JSONDecodeError, TypeError):
+                        business['social_media'] = {}
+                
+                if business.get('keywords'):
+                    try:
+                        business['keywords'] = json.loads(business['keywords'])
+                    except (json.JSONDecodeError, TypeError):
+                        business['keywords'] = []
+                
+                if business.get('issues'):
+                    try:
+                        business['issues'] = json.loads(business['issues'])
+                    except (json.JSONDecodeError, TypeError):
+                        business['issues'] = []
+                
+                businesses.append(business)
+            
             return businesses
             
         except sqlite3.Error as e:
@@ -282,13 +336,20 @@ class LeadDatabase:
             
             fields = [
                 'name', 'address', 'city', 'postal_code', 'phone', 
-                'email', 'website', 'business_type', 'priority', 'notes'
+                'email', 'website', 'business_type', 'priority', 'notes',
+                'social_media', 'opening_hours', 'description', 'keywords',
+                'company_number', 'vat_number', 'contact_completeness', 'address_verified'
             ]
             
             for field in fields:
                 if field in business_data:
                     update_fields.append(f"{field} = ?")
-                    params.append(business_data[field])
+                    
+                    # Handle JSON fields
+                    if field in ['social_media', 'keywords']:
+                        params.append(json.dumps(business_data[field]))
+                    else:
+                        params.append(business_data[field])
             
             # Add last_updated timestamp
             update_fields.append("last_updated = ?")
@@ -456,7 +517,7 @@ class LeadDatabase:
             cursor = self.conn.cursor()
             
             cursor.execute('''
-            SELECT * FROM contact_attempts
+            SELECT id, business_id, date, method, outcome, notes FROM contact_attempts
             WHERE business_id = ?
             ORDER BY date DESC
             ''', (business_id,))
@@ -591,6 +652,32 @@ class LeadDatabase:
         except Exception as e:
             print(f"Error exporting to text: {e}")
             return 0
+    
+    def clear_all_data(self):
+        """
+        Clear all data from the database
+        
+        Returns:
+            Boolean indicating success
+        """
+        try:
+            cursor = self.conn.cursor()
+            
+            # Delete all data from tables in correct order (respecting foreign keys)
+            cursor.execute("DELETE FROM contact_attempts")
+            cursor.execute("DELETE FROM website_metrics")
+            cursor.execute("DELETE FROM businesses")
+            
+            # Reset auto-increment counters
+            cursor.execute("DELETE FROM sqlite_sequence WHERE name IN ('businesses', 'website_metrics', 'contact_attempts')")
+            
+            self.conn.commit()
+            return True
+            
+        except sqlite3.Error as e:
+            print(f"Error clearing data: {e}")
+            self.conn.rollback()
+            return False
     
     def close(self):
         """Close the database connection"""

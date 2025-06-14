@@ -19,13 +19,83 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QRadioButton,
     QMessageBox,
+    QGraphicsOpacityEffect,
+    QFrame,
+    QStyle
 )
+from PySide6.QtCore import QPropertyAnimation, QEasingCurve, Property, QTimer
+from PySide6.QtGui import QPainter, QColor, QPen
 from PySide6.QtCore import Qt, Signal, Slot, QSettings
+from src.gui.theme_manager import theme_manager
 
 from src.core.scraper import BusinessScraper
 from src.core.analyzer import WebsiteAnalyzer
 from src.core.database import LeadDatabase
 from src.utils.helpers import validate_uk_location
+
+
+class LoadingSpinner(QWidget):
+    """Custom loading spinner widget"""
+    def __init__(self, parent=None, size=40, line_width=3):
+        super().__init__(parent)
+        self.size = size
+        self.line_width = line_width
+        self.angle = 0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.rotate)
+        self.setFixedSize(size, size)
+        self.hide()
+
+    def paintEvent(self, event):
+        if not self.isVisible() or not self.isEnabled():
+            return
+            
+        # Check if widget is properly initialized
+        if self.size <= 0 or self.line_width <= 0:
+            return
+            
+        painter = QPainter()
+        if not painter.begin(self):
+            return
+            
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            
+            # Use theme-compatible color with fallback
+            try:
+                color = theme_manager.get_color('primary')
+            except:
+                color = QColor(0, 120, 212)  # Default blue color
+            
+            pen = QPen(color)
+            pen.setWidth(self.line_width)
+            painter.setPen(pen)
+            
+            painter.translate(self.size / 2, self.size / 2)
+            painter.rotate(self.angle)
+            
+            for i in range(8):
+                painter.rotate(45)
+                painter.setOpacity(0.3 + ((i + 1) / 8) * 0.7)  # Increased minimum opacity
+                painter.drawLine(self.size / 4, 0, self.size / 2 - self.line_width, 0)
+        except Exception as e:
+            # Silently handle any painting errors
+            pass
+        finally:
+            if painter.isActive():
+                painter.end()
+
+    def rotate(self):
+        self.angle = (self.angle + 45) % 360
+        self.update()
+
+    def start(self):
+        self.show()
+        self.timer.start(100)
+
+    def stop(self):
+        self.timer.stop()
+        self.hide()
 
 
 class SearchPanel(QWidget):
@@ -42,60 +112,152 @@ class SearchPanel(QWidget):
         # Initialize settings
         self.settings = QSettings("UK Business Lead Generator", "LeadGen")
 
+        # Initialize loading spinner
+        self.loading_spinner = LoadingSpinner(self)
+
         # Set up UI
         self.setup_ui()
+
+        # Setup animations and styles
+        self.setup_animations()
+        self.setup_styles()
 
         # Load settings
         self.load_settings()
 
-        # Initialize thread reference
-        self.search_thread = None
+    def setup_styles(self):
+        """Set up custom styles for widgets"""
+        # Apply theme styling
+        self.setStyleSheet(theme_manager.get_stylesheet())
+        
+        # Connect to theme changes
+        theme_manager.theme_changed.connect(self.apply_theme)
+
+    def validate_location(self, text):
+        """Validate location input and provide visual feedback"""
+        if not text:
+            self.location_hint.setText("")
+            self.location_input.setStyleSheet("")
+            return
+
+        is_valid = validate_uk_location(text)
+        if is_valid:
+            self.location_hint.setText("Valid UK location")
+            self.location_hint.setStyleSheet("color: rgb(39, 174, 96); font-size: 12; margin-left: 4;")
+            self.location_input.setStyleSheet("border: 2 solid rgb(39, 174, 96); border-radius: 6; padding: 8;")
+        else:
+            self.location_hint.setText("Please enter a valid UK location")
+            self.location_hint.setStyleSheet("color: rgb(231, 76, 60); font-size: 12; margin-left: 4;")
+            self.location_input.setStyleSheet("border: 2 solid rgb(231, 76, 60); border-radius: 6; padding: 8;")
 
     def setup_ui(self):
-        """Set up the user interface"""
+        """Set up the user interface with modern styling"""
+        # Create search form container
+        self.search_form = QFrame()
+        self.search_form.setObjectName("searchForm")
+        
+        # Set panel styling
+        # Set minimum width for input fields
+        for widget in self.findChildren((QLineEdit, QComboBox, QSpinBox)):
+            widget.setMinimumWidth(300)
+
+        # Set minimum width for input fields
+        for widget in self.findChildren((QLineEdit, QComboBox, QSpinBox)):
+            widget.setMinimumWidth(300)
+
+
+        # Initialize thread reference
+        self.search_thread = None
+    
+    def apply_theme(self):
+        """Apply the current theme"""
+        self.setStyleSheet(theme_manager.get_stylesheet())
+
+    def setup_animations(self):
+        # Setup fade effect for the search form
+        self.fade_effect = QGraphicsOpacityEffect(self)
+        self.fade_effect.setOpacity(1.0)
+        self.search_form.setGraphicsEffect(self.fade_effect)
+
+        # Create fade animation
+        self.fade_animation = QPropertyAnimation(self.fade_effect, b"opacity")
+        self.fade_animation.setDuration(300)
+        self.fade_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+
+    def setup_ui(self):
+        """Set up the user interface with modern styling"""
+        # Create search form container
+        self.search_form = QFrame()
+        self.search_form.setObjectName("searchForm")
+        
+        # Panel styling will be applied by theme manager
+
         main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
 
-        # Create form layout for search options
+        # Create search container
+        search_container = QWidget()
+        search_container.setObjectName("searchContainer")
+        search_layout = QVBoxLayout(search_container)
+
+        # Create form layout with improved spacing
         form_layout = QFormLayout()
+        form_layout.setSpacing(15)
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        # Location field
+        # Location input with modern styling and tooltip
+        location_container = QWidget()
+        location_layout = QVBoxLayout(location_container)
+        location_layout.setContentsMargins(0, 0, 0, 0)
+        location_layout.setSpacing(4)
+        
         self.location_input = QLineEdit()
-        self.location_input.setPlaceholderText("Enter city, town, or postal code")
-        form_layout.addRow("Location:", self.location_input)
+        self.location_input.setPlaceholderText("e.g., London, Manchester, SW1A 1AA...")
+        self.location_input.setToolTip("Enter a UK city, region, or postcode to search for businesses")
+        self.location_input.textChanged.connect(self.validate_location)
+        location_layout.addWidget(self.location_input)
+        
+        self.location_hint = QLabel()
+        location_layout.addWidget(self.location_hint)
+        form_layout.addRow("Location:", location_container)
 
-        # Category field
+        # Business category input with enhanced styling and autocomplete
+        category_container = QWidget()
+        category_layout = QVBoxLayout(category_container)
+        category_layout.setContentsMargins(0, 0, 0, 0)
+        category_layout.setSpacing(4)
+        
         self.category_input = QComboBox()
         self.category_input.setEditable(True)
-        self.category_input.addItems(
-            [
-                "All Businesses",
-                "Restaurants",
-                "Retail Shops",
-                "Hotels",
-                "Cafes",
-                "Pubs",
-                "Beauty Salons",
-                "Estate Agents",
-                "Solicitors",
-                "Accountants",
-                "Doctors",
-                "Dentists",
-                "Plumbers",
-                "Electricians",
-                "Builders",
-            ]
-        )
-        form_layout.addRow("Business Category:", self.category_input)
+        self.category_input.lineEdit().setPlaceholderText("e.g., Restaurant, Retail, Healthcare...")
+        self.category_input.setToolTip("Select or enter a business category to search for")
+        # Remove hardcoded styling - let theme manager handle it
+        # self.category_input.setStyleSheet() - removed to use theme styling
+        category_layout.addWidget(self.category_input)
+        
+        self.category_hint = QLabel("Start typing to see suggestions")
+        self.category_hint.setProperty("class", "secondary")  # Use theme secondary text
+        category_layout.addWidget(self.category_hint)
+        form_layout.addRow("Business Type:", category_container)
+        # Load default and custom business types
+        self.load_business_types()
 
-        # Limit field
+        # Limit field with modern spinbox
         self.limit_input = QSpinBox()
-        self.limit_input.setRange(5, 100)
-        self.limit_input.setValue(20)
-        self.limit_input.setSingleStep(5)
-        form_layout.addRow("Maximum Results:", self.limit_input)
+        self.limit_input.setRange(5, 200)
+        self.limit_input.setValue(50)
+        self.limit_input.setSingleStep(10)
+        self.limit_input.setPrefix("Up to ")
+        self.limit_input.setSuffix(" results")
+        # Remove hardcoded styling - let theme manager handle it
+        form_layout.addRow("Search Limit:", self.limit_input)
 
-        # Add form to main layout
-        main_layout.addLayout(form_layout)
+        # Add form to search container
+        search_layout.addLayout(form_layout)
+        
+        # Add search container to main layout
+        main_layout.addWidget(search_container)
 
         # Options group
         options_group = QGroupBox("Search Options")
@@ -125,18 +287,34 @@ class SearchPanel(QWidget):
 
         main_layout.addWidget(options_group)
 
-        # Search button and progress bar
+        # Search button and progress bar with modern styling
         button_layout = QHBoxLayout()
 
-        self.search_button = QPushButton("Generate Leads")
-        self.search_button.clicked.connect(self.on_search_clicked)
-        button_layout.addWidget(self.search_button)
-
+        # Progress bar with modern styling
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                border-radius: 10;
+                background: rgb(223, 230, 233);
+                height: 8;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                border-radius: 10;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgb(9, 132, 227), stop:1 rgb(0, 206, 201));
+            }
+        """)
         button_layout.addWidget(self.progress_bar)
+
+        # Search button with modern styling
+        self.search_button = QPushButton("Generate Leads")
+        self.search_button.clicked.connect(self.on_search_clicked)
+        button_layout.addWidget(self.search_button)
 
         main_layout.addLayout(button_layout)
 
@@ -205,6 +383,44 @@ class SearchPanel(QWidget):
         else:
             self.settings.setValue("search/priority_focus", "all")
 
+    def load_business_types(self):
+        """Load default and custom business types into the dropdown"""
+        # Clear existing items
+        self.category_input.clear()
+        
+        # Default business types
+        default_types = [
+            "All Businesses",
+            "Restaurants & Cafes",
+            "Retail & Shopping",
+            "Hotels & Accommodation",
+            "Pubs & Bars",
+            "Health & Beauty",
+            "Professional Services",
+            "Healthcare",
+            "Construction & Trade",
+            "Technology & IT",
+            "Education & Training",
+            "Automotive",
+            "Entertainment & Leisure",
+            "Manufacturing",
+            "Transport & Logistics"
+        ]
+        
+        # Add default types
+        self.category_input.addItems(default_types)
+        
+        # Load custom business types from settings
+        custom_types = self.settings.value("search/custom_business_types", "")
+        if custom_types:
+            # Split by lines and filter out empty lines
+            custom_list = [line.strip() for line in custom_types.split('\n') if line.strip()]
+            if custom_list:
+                # Add separator
+                self.category_input.addItem("--- Custom Types ---")
+                # Add custom types
+                self.category_input.addItems(custom_list)
+
     def clear_form(self):
         """Clear the search form"""
         self.location_input.clear()
@@ -232,13 +448,17 @@ class SearchPanel(QWidget):
 
     @Slot()
     def on_search_clicked(self):
-        """Handle search button click"""
+        """Handle search button click with enhanced visual feedback"""
         # Get search parameters
         location = self.location_input.text().strip()
 
         # Validate location
         if not location:
             QMessageBox.warning(self, "Missing Location", "Please enter a location.")
+            # Apply error styling through theme manager
+            self.location_input.setProperty("error", True)
+            self.location_input.style().unpolish(self.location_input)
+            self.location_input.style().polish(self.location_input)
             return
 
         if not validate_uk_location(location):
@@ -269,6 +489,14 @@ class SearchPanel(QWidget):
             priority_focus = "poor_website"
         else:
             priority_focus = "all"
+
+        # Start visual feedback
+        self.fade_animation.setStartValue(1.0)
+        self.fade_animation.setEndValue(0.5)
+        self.fade_animation.start()
+        
+        self.search_button.setText("Searching...")
+        self.loading_spinner.start()
 
         # Save settings
         self.save_settings()
@@ -409,6 +637,31 @@ class SearchPanel(QWidget):
             # Update UI from main thread
             from PySide6.QtCore import QMetaObject, Qt, Q_ARG
 
+            # Reset button state
             QMetaObject.invokeMethod(
                 self.search_button, "setEnabled", Qt.QueuedConnection, Q_ARG(bool, True)
+            )
+            QMetaObject.invokeMethod(
+                self.search_button, "setText", Qt.QueuedConnection, Q_ARG(str, "Search")
+            )
+            
+            # Stop loading spinner
+            QMetaObject.invokeMethod(
+                self.loading_spinner, "stop", Qt.QueuedConnection
+            )
+            
+            # Hide progress bar
+            QMetaObject.invokeMethod(
+                self.progress_bar, "setVisible", Qt.QueuedConnection, Q_ARG(bool, False)
+            )
+            
+            # Reset fade animation
+            QMetaObject.invokeMethod(
+                self.fade_animation, "setStartValue", Qt.QueuedConnection, Q_ARG(float, 0.5)
+            )
+            QMetaObject.invokeMethod(
+                self.fade_animation, "setEndValue", Qt.QueuedConnection, Q_ARG(float, 1.0)
+            )
+            QMetaObject.invokeMethod(
+                self.fade_animation, "start", Qt.QueuedConnection
             )

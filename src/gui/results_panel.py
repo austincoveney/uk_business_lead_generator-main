@@ -34,6 +34,7 @@ from PySide6.QtCore import (
     QObject,
 )
 from PySide6.QtGui import QColor, QBrush, QFont, QIcon, QCursor
+from src.gui.theme_manager import theme_manager
 
 from src.core.database import LeadDatabase
 from src.core.export import LeadExporter
@@ -50,10 +51,25 @@ class BusinessTableModel(QAbstractTableModel):
             "Name",
             "Business Type",
             "Phone",
+            "Email",
             "Website",
             "Address",
+            "Contact Score",
+            "Social Media",
             "Issues",
         ]
+        
+        # Define colors for priority levels
+        self.priority_colors = {
+            "High": QColor(255, 235, 238),     # Light red
+            "Medium": QColor(255, 243, 224),   # Light orange
+            "Low": QColor(232, 245, 233),      # Light green
+            "Unknown": QColor(245, 245, 245)   # Light gray
+        }
+        
+        self.header_font = QFont()
+        self.header_font.setBold(True)
+        self.header_font.setPointSize(10)
 
     def load_data(self, businesses):
         """Load business data into the model"""
@@ -96,26 +112,59 @@ class BusinessTableModel(QAbstractTableModel):
                 # Phone
                 return business.get("phone", "")
             elif column == 4:
+                # Email
+                return business.get("email", "")
+            elif column == 5:
                 # Website
                 return business.get("website", "")
-            elif column == 5:
+            elif column == 6:
                 # Address
                 return business.get("address", "")
-            elif column == 6:
+            elif column == 7:
+                # Contact Score
+                score = business.get("contact_completeness", 0)
+                return f"{score}%" if score > 0 else ""
+            elif column == 8:
+                # Social Media
+                social = business.get("social_media", {})
+                if social:
+                    platforms = list(social.keys())
+                    return ", ".join(platforms[:3])  # Show first 3 platforms
+                return ""
+            elif column == 9:
                 # Issues
                 issues = business.get("issues", [])
                 if isinstance(issues, list) and issues:
                     return f"{len(issues)} issues"
                 return ""
+        elif role == Qt.BackgroundRole:
+            if column == 0:
+                priority_text = self.data(index, Qt.DisplayRole)
+                return self.priority_colors.get(priority_text, QColor("#ffffff"))
+            return QColor("#ffffff")
+        elif role == Qt.ForegroundRole:
+            return QColor("#000000")
+        elif role == Qt.FontRole:
+            font = QFont()
+            if column == 0:  # Priority column
+                font.setBold(True)
+            return font
+        elif role == Qt.TextAlignmentRole:
+            if column in [0, 3, 7]:  # Priority, Phone, and Contact Score columns
+                return Qt.AlignCenter
+            return Qt.AlignLeft | Qt.AlignVCenter
 
         elif role == Qt.BackgroundRole:
             priority = business.get("priority", 0)
             if priority == 1:  # High priority
-                return QBrush(QColor(255, 230, 230))
+                return QBrush(QColor(255, 180, 180))
             elif priority == 2:  # Medium priority
-                return QBrush(QColor(255, 245, 230))
+                return QBrush(QColor(255, 220, 180))
             elif priority == 3:  # Low priority
-                return QBrush(QColor(240, 255, 240))
+                return QBrush(QColor(180, 255, 180))
+
+        elif role == Qt.ForegroundRole:
+            return QBrush(QColor(0, 0, 0))  # Always black text for better contrast
 
         elif role == Qt.FontRole:
             if column == 1:  # Business name
@@ -161,8 +210,23 @@ class ResultsPanel(QWidget):
         # Set up UI
         self.setup_ui()
 
+        # Apply custom styles
+        self.setup_styles()
+
         # Load settings
         self.load_settings()
+
+    def setup_styles(self):
+        """Set up custom styles for the results panel"""
+        # Apply theme styling
+        self.setStyleSheet(theme_manager.get_stylesheet())
+        
+        # Connect to theme changes
+        theme_manager.theme_changed.connect(self.apply_theme)
+
+    def apply_theme(self):
+        """Apply the current theme"""
+        self.setStyleSheet(theme_manager.get_stylesheet())
 
     def setup_ui(self):
         """Set up the user interface"""
@@ -245,6 +309,18 @@ class ResultsPanel(QWidget):
 
         self.website_label = QLabel()
         info_layout.addRow("Website:", self.website_label)
+        
+        self.contact_score_label = QLabel()
+        info_layout.addRow("Contact Score:", self.contact_score_label)
+        
+        self.social_media_label = QLabel()
+        info_layout.addRow("Social Media:", self.social_media_label)
+        
+        self.opening_hours_label = QLabel()
+        info_layout.addRow("Opening Hours:", self.opening_hours_label)
+        
+        self.company_details_label = QLabel()
+        info_layout.addRow("Company Details:", self.company_details_label)
 
         details_layout.addWidget(info_group)
 
@@ -257,36 +333,18 @@ class ResultsPanel(QWidget):
         self.performance_progress = QProgressBar()
         self.performance_progress.setRange(0, 100)
         self.performance_progress.setValue(0)
-        self.performance_progress.setStyleSheet(
-            """
-            QProgressBar {
-                border: 1px solid #ccc;
-                border-radius: 3px;
-                text-align: center;
-            }
-            QProgressBar::chunk {
-                background-color: #4CAF50;
-            }
-        """
-        )
+        self.performance_progress.setFormat("0%")
+        self.performance_progress.setProperty("class", "performance")
+
         metrics_layout.addWidget(QLabel("Performance:"))
         metrics_layout.addWidget(self.performance_progress)
 
         self.seo_progress = QProgressBar()
         self.seo_progress.setRange(0, 100)
         self.seo_progress.setValue(0)
-        self.seo_progress.setStyleSheet(
-            """
-            QProgressBar {
-                border: 1px solid #ccc;
-                border-radius: 3px;
-                text-align: center;
-            }
-            QProgressBar::chunk {
-                background-color: #2196F3;
-            }
-        """
-        )
+        self.seo_progress.setFormat("0%")
+        self.seo_progress.setProperty("class", "seo")
+
         metrics_layout.addWidget(QLabel("SEO:"))
         metrics_layout.addWidget(self.seo_progress)
 
@@ -297,36 +355,18 @@ class ResultsPanel(QWidget):
         self.accessibility_progress = QProgressBar()
         self.accessibility_progress.setRange(0, 100)
         self.accessibility_progress.setValue(0)
-        self.accessibility_progress.setStyleSheet(
-            """
-            QProgressBar {
-                border: 1px solid #ccc;
-                border-radius: 3px;
-                text-align: center;
-            }
-            QProgressBar::chunk {
-                background-color: #FFC107;
-            }
-        """
-        )
+        self.accessibility_progress.setFormat("0%")
+        self.accessibility_progress.setProperty("class", "accessibility")
+
         metrics_layout2.addWidget(QLabel("Accessibility:"))
         metrics_layout2.addWidget(self.accessibility_progress)
 
         self.best_practices_progress = QProgressBar()
         self.best_practices_progress.setRange(0, 100)
         self.best_practices_progress.setValue(0)
-        self.best_practices_progress.setStyleSheet(
-            """
-            QProgressBar {
-                border: 1px solid #ccc;
-                border-radius: 3px;
-                text-align: center;
-            }
-            QProgressBar::chunk {
-                background-color: #9C27B0;
-            }
-        """
-        )
+        self.best_practices_progress.setFormat("0%")
+        self.best_practices_progress.setProperty("class", "best_practices")
+
         metrics_layout2.addWidget(QLabel("Best Practices:"))
         metrics_layout2.addWidget(self.best_practices_progress)
 
@@ -451,9 +491,25 @@ class ResultsPanel(QWidget):
 
         # Load businesses
         businesses = self.current_database.get_all_businesses()
+        
+        # Debug: Print business data
+        print(f"\n=== DEBUG: Loading {len(businesses)} businesses ===")
+        for i, business in enumerate(businesses[:3]):  # Print first 3 businesses
+            print(f"Business {i+1}: {business.get('name', 'Unknown')}")
+            print(f"  Website: {business.get('website', 'None')}")
+            print(f"  SEO Score: {business.get('seo_score', 'None')}")
+            print(f"  Performance Score: {business.get('performance_score', 'None')}")
+            print(f"  Accessibility Score: {business.get('accessibility_score', 'None')}")
+            print(f"  Best Practices Score: {business.get('best_practices_score', 'None')}")
+            print(f"  Priority: {business.get('priority', 'None')}")
+            print(f"  Issues: {len(business.get('issues', []))} issues")
+            print("---")
 
         # Update model
         self.model.load_data(businesses)
+        print(f"Loaded {len(businesses)} businesses into model")
+        print(f"Model row count after loading: {self.model.rowCount()}")
+        print(f"has_results() returns: {self.has_results()}")
 
         # Update status
         self.result_count_label.setText(
@@ -461,18 +517,24 @@ class ResultsPanel(QWidget):
         )
 
         # Enable buttons
-        self.update_buttons_state(len(businesses) > 0)
+        has_results_value = len(businesses) > 0
+        print(f"Calling update_buttons_state with: {has_results_value}")
+        self.update_buttons_state(has_results_value)
 
         # Clear details
         self.clear_details()
 
     def update_buttons_state(self, has_results):
         """Update button states based on whether we have results"""
+        print(f"Updating button states - has_results: {has_results}")
         self.csv_button.setEnabled(has_results)
         self.report_button.setEnabled(has_results)
+        # These buttons are enabled when a business is selected
         self.open_website_button.setEnabled(False)
         self.save_notes_button.setEnabled(False)
         self.delete_button.setEnabled(False)
+        print(f"CSV button enabled: {self.csv_button.isEnabled()}")
+        print(f"Report button enabled: {self.report_button.isEnabled()}")
 
     def clear_details(self):
         """Clear business details panel"""
@@ -482,11 +544,19 @@ class ResultsPanel(QWidget):
         self.phone_label.setText("")
         self.email_label.setText("")
         self.website_label.setText("")
+        self.contact_score_label.setText("")
+        self.social_media_label.setText("")
+        self.opening_hours_label.setText("")
+        self.company_details_label.setText("")
 
         self.performance_progress.setValue(0)
+        self.performance_progress.setFormat("0%")
         self.seo_progress.setValue(0)
+        self.seo_progress.setFormat("0%")
         self.accessibility_progress.setValue(0)
+        self.accessibility_progress.setFormat("0%")
         self.best_practices_progress.setValue(0)
+        self.best_practices_progress.setFormat("0%")
 
         self.issues_text.clear()
         self.notes_text.clear()
@@ -496,8 +566,19 @@ class ResultsPanel(QWidget):
     def show_business_details(self, business):
         """Show details for the selected business"""
         if not business:
+            print("show_business_details called with None business")
             self.clear_details()
             return
+        
+        # Debug: Print selected business data
+        print(f"\n=== DEBUG: Showing details for {business.get('name', 'Unknown')} ===")
+        print(f"  SEO Score: {business.get('seo_score', 'None')} (type: {type(business.get('seo_score'))})")
+        print(f"  Performance Score: {business.get('performance_score', 'None')} (type: {type(business.get('performance_score'))})")
+        print(f"  Accessibility Score: {business.get('accessibility_score', 'None')} (type: {type(business.get('accessibility_score'))})")
+        print(f"  Best Practices Score: {business.get('best_practices_score', 'None')} (type: {type(business.get('best_practices_score'))})")
+        print(f"  Issues: {business.get('issues', [])}")
+        print(f"  Website: {business.get('website', 'None')}")
+        print(f"  All keys in business: {list(business.keys())}")
 
         # Basic info
         self.name_label.setText(business.get("name", ""))
@@ -513,18 +594,72 @@ class ResultsPanel(QWidget):
             self.website_label.setOpenExternalLinks(True)
         else:
             self.website_label.setText("None")
+        
+        # Contact completeness score
+        contact_score = business.get("contact_completeness", 0)
+        if contact_score > 0:
+            self.contact_score_label.setText(f"{contact_score}%")
+            # Color code the score
+            if contact_score >= 80:
+                self.contact_score_label.setStyleSheet("color: green; font-weight: bold;")
+            elif contact_score >= 60:
+                self.contact_score_label.setStyleSheet("color: orange; font-weight: bold;")
+            else:
+                self.contact_score_label.setStyleSheet("color: red; font-weight: bold;")
+        else:
+            self.contact_score_label.setText("Not available")
+            self.contact_score_label.setStyleSheet("color: gray;")
+        
+        # Social media links
+        social_media = business.get("social_media", {})
+        if social_media and isinstance(social_media, dict):
+            social_links = []
+            for platform, url in social_media.items():
+                social_links.append(f'<a href="{url}">{platform.title()}</a>')
+            self.social_media_label.setText(" | ".join(social_links))
+            self.social_media_label.setOpenExternalLinks(True)
+        else:
+            self.social_media_label.setText("None")
+        
+        # Opening hours
+        opening_hours = business.get("opening_hours", "")
+        if opening_hours:
+            self.opening_hours_label.setText(opening_hours)
+        else:
+            self.opening_hours_label.setText("Not available")
+        
+        # Company details
+        company_details = []
+        if business.get("company_number"):
+            company_details.append(f"Company: {business['company_number']}")
+        if business.get("vat_number"):
+            company_details.append(f"VAT: {business['vat_number']}")
+        
+        if company_details:
+            self.company_details_label.setText(" | ".join(company_details))
+        else:
+            self.company_details_label.setText("Not available")
 
-        # Website metrics - Ensure we're passing integers to setValue
-        self.performance_progress.setValue(
-            int(business.get("performance_score", 0) or 0)
-        )
-        self.seo_progress.setValue(int(business.get("seo_score", 0) or 0))
-        self.accessibility_progress.setValue(
-            int(business.get("accessibility_score", 0) or 0)
-        )
-        self.best_practices_progress.setValue(
-            int(business.get("best_practices_score", 0) or 0)
-        )
+        # Website metrics - Ensure we're passing integers to setValue and show percentage
+        perf_score = int(business.get("performance_score", 0) or 0)
+        seo_score = int(business.get("seo_score", 0) or 0)
+        access_score = int(business.get("accessibility_score", 0) or 0)
+        bp_score = int(business.get("best_practices_score", 0) or 0)
+        
+        self.performance_progress.setValue(perf_score)
+        self.performance_progress.setFormat(f"{perf_score}%")
+        
+        self.seo_progress.setValue(seo_score)
+        self.seo_progress.setFormat(f"{seo_score}%")
+        
+        self.accessibility_progress.setValue(access_score)
+        self.accessibility_progress.setFormat(f"{access_score}%")
+        
+        self.best_practices_progress.setValue(bp_score)
+        self.best_practices_progress.setFormat(f"{bp_score}%")
+        
+        # Debug: Print the scores being set
+        print(f"Setting scores - Performance: {perf_score}%, SEO: {seo_score}%, Accessibility: {access_score}%, Best Practices: {bp_score}%")
 
         # Issues
         issues = business.get("issues", [])
@@ -630,15 +765,21 @@ class ResultsPanel(QWidget):
     @Slot()
     def on_selection_changed(self):
         """Handle table selection change"""
+        print("on_selection_changed called")
         indexes = self.table_view.selectionModel().selectedRows()
+        print(f"Selected indexes: {len(indexes)}")
         if indexes:
             # Get the business data from the selected row
             proxy_index = indexes[0]
             source_index = self.proxy_model.mapToSource(proxy_index)
             business = self.model.data(source_index, Qt.UserRole)
+            print(f"Retrieved business data: {business is not None}")
+            if business:
+                print(f"Business name: {business.get('name', 'Unknown')}")
 
             self.show_business_details(business)
         else:
+            print("No selection, clearing details")
             self.clear_details()
 
     @Slot()
