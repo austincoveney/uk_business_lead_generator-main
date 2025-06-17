@@ -8,6 +8,22 @@ pyinstaller==5.8.0
 pillow==9.4.0
 webdriver-manager==3.8.5
 
+# Enhanced Features Dependencies
+requests-cache>=0.9.0    # Caching system
+pandas>=1.5.0            # Data manipulation
+matplotlib>=3.6.0        # Charts and visualization
+seaborn>=0.11.0          # Advanced plotting
+validate-email>=1.3      # Email validation
+fuzzywuzzy>=0.18.0       # Duplicate detection
+python-Levenshtein>=0.20.0  # Fuzzy matching performance
+openpyxl>=3.0.0          # Excel export
+reportlab>=3.6.0         # PDF generation
+plotly>=5.0.0            # Interactive charts
+numpy>=1.24.0            # Numerical operations
+sqlalchemy>=2.0.0        # Enhanced database operations
+celery>=5.2.0            # Background tasks (optional)
+redis>=4.3.0             # Cache backend (optional)
+
 # Testing Dependencies
 pytest==7.3.1
 pytest-cov==4.1.0

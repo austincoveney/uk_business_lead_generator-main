@@ -21,9 +21,12 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QGraphicsOpacityEffect,
     QFrame,
-    QStyle
+    QStyle,
+    QCompleter,
+    QListWidget,
+    QListWidgetItem
 )
-from PySide6.QtCore import QPropertyAnimation, QEasingCurve, Property, QTimer
+from PySide6.QtCore import QPropertyAnimation, QEasingCurve, Property, QTimer, QStringListModel
 from PySide6.QtGui import QPainter, QColor, QPen
 from PySide6.QtCore import Qt, Signal, Slot, QSettings
 from src.gui.theme_manager import theme_manager
@@ -32,6 +35,8 @@ from src.core.scraper import BusinessScraper
 from src.core.analyzer import WebsiteAnalyzer
 from src.core.database import LeadDatabase
 from src.utils.helpers import validate_uk_location
+from src.utils.search_history import SearchHistoryManager
+from src.data.business_types import get_business_suggestions, ALL_BUSINESS_TYPES, POPULAR_TYPES
 
 
 class LoadingSpinner(QWidget):
@@ -53,37 +58,31 @@ class LoadingSpinner(QWidget):
         # Check if widget is properly initialized
         if self.size <= 0 or self.line_width <= 0:
             return
-            
-        painter = QPainter()
-        if not painter.begin(self):
+        
+        # Check if widget has valid geometry
+        if self.width() <= 0 or self.height() <= 0:
             return
             
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Use theme-compatible color with fallback
         try:
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            
-            # Use theme-compatible color with fallback
-            try:
-                color = theme_manager.get_color('primary')
-            except:
-                color = QColor(0, 120, 212)  # Default blue color
-            
-            pen = QPen(color)
-            pen.setWidth(self.line_width)
-            painter.setPen(pen)
-            
-            painter.translate(self.size / 2, self.size / 2)
-            painter.rotate(self.angle)
-            
-            for i in range(8):
-                painter.rotate(45)
-                painter.setOpacity(0.3 + ((i + 1) / 8) * 0.7)  # Increased minimum opacity
-                painter.drawLine(self.size / 4, 0, self.size / 2 - self.line_width, 0)
-        except Exception as e:
-            # Silently handle any painting errors
-            pass
-        finally:
-            if painter.isActive():
-                painter.end()
+            color = theme_manager.get_color('primary')
+        except:
+            color = QColor(0, 120, 212)  # Default blue color
+        
+        pen = QPen(color)
+        pen.setWidth(self.line_width)
+        painter.setPen(pen)
+        
+        painter.translate(self.size / 2, self.size / 2)
+        painter.rotate(self.angle)
+        
+        for i in range(8):
+            painter.rotate(45)
+            painter.setOpacity(0.3 + ((i + 1) / 8) * 0.7)  # Increased minimum opacity
+            painter.drawLine(self.size / 4, 0, self.size / 2 - self.line_width, 0)
 
     def rotate(self):
         self.angle = (self.angle + 45) % 360
@@ -112,6 +111,12 @@ class SearchPanel(QWidget):
         # Initialize settings
         self.settings = QSettings("UK Business Lead Generator", "LeadGen")
 
+        # Initialize search thread
+        self.search_thread = None
+        
+        # Initialize search history
+        self.search_history = SearchHistoryManager(self.settings)
+
         # Initialize loading spinner
         self.loading_spinner = LoadingSpinner(self)
 
@@ -121,9 +126,66 @@ class SearchPanel(QWidget):
         # Setup animations and styles
         self.setup_animations()
         self.setup_styles()
+        self.setup_auto_complete()
+        
+        # Load business types after auto-complete is set up
+        self.load_business_types()
 
         # Load settings
         self.load_settings()
+        
+        # Connect signals
+        self.search_button.clicked.connect(self.on_search_clicked)
+        self.location_input.returnPressed.connect(self.on_search_clicked)
+        self.category_input.lineEdit().returnPressed.connect(self.on_search_clicked)
+    
+    def setup_auto_complete(self):
+        """Setup auto-complete functionality for inputs"""
+        # Setup location auto-complete
+        self.location_completer = QCompleter()
+        self.location_completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.location_completer.setFilterMode(Qt.MatchContains)
+        self.location_input.setCompleter(self.location_completer)
+        
+        # Setup business type auto-complete for the combo box
+        self.category_completer = QCompleter()
+        self.category_completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.category_completer.setFilterMode(Qt.MatchContains)
+        self.category_input.setCompleter(self.category_completer)
+        
+        # Connect text change signals to update suggestions
+        self.location_input.textChanged.connect(self.update_location_suggestions)
+        self.category_input.lineEdit().textChanged.connect(self.update_business_type_suggestions)
+        
+        # Initial population of suggestions
+        self.update_location_suggestions()
+        self.update_business_type_suggestions()
+    
+    def update_location_suggestions(self, text=""):
+        """Update location auto-complete suggestions"""
+        # Check if completer is initialized
+        if not hasattr(self, 'location_completer'):
+            return
+            
+        suggestions = self.search_history.get_location_suggestions(text)
+        model = QStringListModel(suggestions)
+        self.location_completer.setModel(model)
+    
+    def update_business_type_suggestions(self, text=""):
+        """Update business type auto-complete suggestions"""
+        # Check if completer is initialized
+        if not hasattr(self, 'category_completer'):
+            return
+            
+        # Combine history suggestions with predefined types
+        history_suggestions = self.search_history.get_business_type_suggestions(text)
+        predefined_suggestions = get_business_suggestions(text)
+        
+        # Merge and deduplicate
+        all_suggestions = list(dict.fromkeys(history_suggestions + predefined_suggestions))
+        
+        model = QStringListModel(all_suggestions)
+        self.category_completer.setModel(model)
 
     def setup_styles(self):
         """Set up custom styles for widgets"""
@@ -240,8 +302,7 @@ class SearchPanel(QWidget):
         self.category_hint.setProperty("class", "secondary")  # Use theme secondary text
         category_layout.addWidget(self.category_hint)
         form_layout.addRow("Business Type:", category_container)
-        # Load default and custom business types
-        self.load_business_types()
+        # Load default and custom business types (will be called after auto-complete setup)
 
         # Limit field with modern spinbox
         self.limit_input = QSpinBox()
@@ -384,42 +445,21 @@ class SearchPanel(QWidget):
             self.settings.setValue("search/priority_focus", "all")
 
     def load_business_types(self):
-        """Load default and custom business types into the dropdown"""
-        # Clear existing items
+        """Load business types into the category combo box"""
+        # Load custom types from settings
+        custom_types = self.settings.value("custom_business_types", [])
+        if isinstance(custom_types, str):
+            custom_types = [custom_types]
+        
+        # Combine popular types with custom types
+        all_types = sorted(set(POPULAR_TYPES + custom_types))
+        
+        # Populate combo box
         self.category_input.clear()
+        self.category_input.addItems(all_types)
         
-        # Default business types
-        default_types = [
-            "All Businesses",
-            "Restaurants & Cafes",
-            "Retail & Shopping",
-            "Hotels & Accommodation",
-            "Pubs & Bars",
-            "Health & Beauty",
-            "Professional Services",
-            "Healthcare",
-            "Construction & Trade",
-            "Technology & IT",
-            "Education & Training",
-            "Automotive",
-            "Entertainment & Leisure",
-            "Manufacturing",
-            "Transport & Logistics"
-        ]
-        
-        # Add default types
-        self.category_input.addItems(default_types)
-        
-        # Load custom business types from settings
-        custom_types = self.settings.value("search/custom_business_types", "")
-        if custom_types:
-            # Split by lines and filter out empty lines
-            custom_list = [line.strip() for line in custom_types.split('\n') if line.strip()]
-            if custom_list:
-                # Add separator
-                self.category_input.addItem("--- Custom Types ---")
-                # Add custom types
-                self.category_input.addItems(custom_list)
+        # Update auto-complete suggestions
+        self.update_business_type_suggestions()
 
     def clear_form(self):
         """Clear the search form"""
@@ -489,6 +529,13 @@ class SearchPanel(QWidget):
             priority_focus = "poor_website"
         else:
             priority_focus = "all"
+
+        # Save to search history
+        self.search_history.add_search(location, category)
+        
+        # Update auto-complete suggestions with new search
+        self.update_location_suggestions()
+        self.update_business_type_suggestions()
 
         # Start visual feedback
         self.fade_animation.setStartValue(1.0)
