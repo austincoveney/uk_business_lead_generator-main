@@ -63,26 +63,32 @@ class LoadingSpinner(QWidget):
         if self.width() <= 0 or self.height() <= 0:
             return
             
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Use theme-compatible color with fallback
+        painter = QPainter()
+        if not painter.begin(self):
+            return  # Failed to begin painting
+            
         try:
-            color = theme_manager.get_color('primary')
-        except:
-            color = QColor(0, 120, 212)  # Default blue color
-        
-        pen = QPen(color)
-        pen.setWidth(self.line_width)
-        painter.setPen(pen)
-        
-        painter.translate(self.size / 2, self.size / 2)
-        painter.rotate(self.angle)
-        
-        for i in range(8):
-            painter.rotate(45)
-            painter.setOpacity(0.3 + ((i + 1) / 8) * 0.7)  # Increased minimum opacity
-            painter.drawLine(self.size / 4, 0, self.size / 2 - self.line_width, 0)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            
+            # Use theme-compatible color with fallback
+            try:
+                color = theme_manager.get_color('primary')
+            except (AttributeError, KeyError, TypeError):
+                color = QColor(0, 120, 212)  # Default blue color
+            
+            pen = QPen(color)
+            pen.setWidth(self.line_width)
+            painter.setPen(pen)
+            
+            painter.translate(self.size / 2, self.size / 2)
+            painter.rotate(self.angle)
+            
+            for i in range(8):
+                painter.rotate(45)
+                painter.setOpacity(0.3 + ((i + 1) / 8) * 0.7)  # Increased minimum opacity
+                painter.drawLine(self.size / 4, 0, self.size / 2 - self.line_width, 0)
+        finally:
+            painter.end()
 
     def rotate(self):
         self.angle = (self.angle + 45) % 360
@@ -298,6 +304,12 @@ class SearchPanel(QWidget):
         # self.category_input.setStyleSheet() - removed to use theme styling
         category_layout.addWidget(self.category_input)
         
+        # Add general area search checkbox
+        self.general_search_checkbox = QCheckBox("Search all businesses in area (ignore category)")
+        self.general_search_checkbox.setToolTip("When checked, searches for all businesses in the location regardless of category")
+        self.general_search_checkbox.toggled.connect(self.on_general_search_toggled)
+        category_layout.addWidget(self.general_search_checkbox)
+        
         self.category_hint = QLabel("Start typing to see suggestions")
         self.category_hint.setProperty("class", "secondary")  # Use theme secondary text
         category_layout.addWidget(self.category_hint)
@@ -352,7 +364,7 @@ class SearchPanel(QWidget):
         size_layout.addWidget(size_label)
 
         self.size_combo = QComboBox()
-        self.size_combo.addItems(["All Sizes", "Small", "Medium", "Large", "Enterprise"])
+        self.size_combo.addItems(["All Sizes", "Small", "Medium", "Large", "Enterprise", "Unknown"])
         self.size_combo.setCurrentText("All Sizes")
         size_layout.addWidget(self.size_combo)
         size_layout.addStretch()
@@ -430,6 +442,11 @@ class SearchPanel(QWidget):
         self.analyze_websites_checkbox.setChecked(
             self.settings.value("search/analyze_websites", True, bool)
         )
+        
+        # Load general search setting
+        self.general_search_checkbox.setChecked(
+            self.settings.value("search/general_search", False, bool)
+        )
 
         priority_focus = self.settings.value("search/priority_focus", "all")
         if priority_focus == "no_website":
@@ -454,6 +471,11 @@ class SearchPanel(QWidget):
         self.settings.setValue("search/limit", self.limit_input.value())
         self.settings.setValue(
             "search/analyze_websites", self.analyze_websites_checkbox.isChecked()
+        )
+        
+        # Save general search setting
+        self.settings.setValue(
+            "search/general_search", self.general_search_checkbox.isChecked()
         )
 
         if self.priority_no_website_radio.isChecked():
@@ -489,6 +511,7 @@ class SearchPanel(QWidget):
         self.category_input.setCurrentIndex(0)
         self.limit_input.setValue(20)
         self.analyze_websites_checkbox.setChecked(True)
+        self.general_search_checkbox.setChecked(False)
         self.priority_all_radio.setChecked(True)
         self.status_label.clear()
         self.progress_bar.setValue(0)
@@ -508,6 +531,15 @@ class SearchPanel(QWidget):
             self.progress_bar, "setValue", Qt.QueuedConnection, Q_ARG(int, progress)
         )
 
+    def on_general_search_toggled(self, checked):
+        """Handle general search checkbox toggle"""
+        # Enable/disable category input based on general search checkbox
+        self.category_input.setEnabled(not checked)
+        if checked:
+            self.category_hint.setText("Category selection disabled for general area search")
+        else:
+            self.category_hint.setText("Start typing to see suggestions")
+    
     @Slot()
     def on_search_clicked(self):
         """Handle search button click with enhanced visual feedback"""
@@ -537,7 +569,8 @@ class SearchPanel(QWidget):
                 return
 
         # Get other parameters
-        category = self.category_input.currentText()
+        general_search = self.general_search_checkbox.isChecked()
+        category = None if general_search else self.category_input.currentText()
         if category == "All Businesses":
             category = None
 
@@ -600,7 +633,7 @@ class SearchPanel(QWidget):
             analyzer = None
             if analyze_websites:
                 self.update_status("Initializing website analyzer...", 10)
-                analyzer = WebsiteAnalyzer(use_lighthouse=True)
+                analyzer = WebsiteAnalyzer(use_selenium=True)
 
             # Start search
             self.update_status(f"Searching for businesses in {location}...", 15)

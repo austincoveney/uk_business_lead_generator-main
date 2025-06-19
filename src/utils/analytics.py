@@ -282,8 +282,9 @@ class BusinessAnalytics:
                     domain = urlparse(website).netloc.lower()
                     if domain:
                         website_domains.append(domain)
-                except:
-                    pass
+                except (ValueError, AttributeError) as e:
+                    # Skip invalid URLs
+                    continue
         
         email_domain_counts = Counter(email_domains)
         phone_prefix_counts = Counter(phone_prefixes)

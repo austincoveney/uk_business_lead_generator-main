@@ -26,7 +26,9 @@ class LeadDatabase:
         """Establish database connection with improved connection handling"""
         try:
             # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
+            db_dir = os.path.dirname(os.path.abspath(self.db_path))
+            if db_dir:  # Only create if there's a directory path
+                os.makedirs(db_dir, exist_ok=True)
             
             # Enable WAL mode for better concurrent access
             self.conn = sqlite3.connect(

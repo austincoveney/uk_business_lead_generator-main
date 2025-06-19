@@ -1,15 +1,20 @@
 """Automation engine for continuous business lead generation"""
 
 import time
+import random
+import asyncio
 import logging
 import threading
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, Any, Union, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
+import json
+from pathlib import Path
 
 from ..utils.config import Config
 from ..utils.logger import setup_logger
+from ..utils.error_handler import ErrorHandler, ErrorSeverity, ErrorCategory, error_handler_decorator
 from .scraper import BusinessScraper
 from .analyzer import WebsiteAnalyzer
 from .database import LeadDatabase
@@ -23,16 +28,110 @@ class AutomationStatus(Enum):
     ERROR = "error"
 
 
+class RetryStrategy(Enum):
+    """Retry strategy types"""
+    FIXED = "fixed"
+    EXPONENTIAL = "exponential"
+    LINEAR = "linear"
+    FIBONACCI = "fibonacci"
+    CUSTOM = "custom"
+
+
+class TaskStatus(Enum):
+    """Task execution status"""
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+    RETRYING = "retrying"
+    CANCELLED = "cancelled"
+    TIMEOUT = "timeout"
+
+
 @dataclass
-class SearchTask:
-    """Individual search task configuration"""
-    location: str
-    business_type: Optional[str] = None
-    limit: int = 50
+class RetryConfig:
+    """Configuration for retry behavior"""
+    max_attempts: int = 3
+    strategy: RetryStrategy = RetryStrategy.EXPONENTIAL
+    base_delay: float = 1.0
+    max_delay: float = 60.0
+    backoff_factor: float = 2.0
+    jitter: bool = True
+    jitter_range: float = 0.1
+    retry_on_exceptions: List[type] = field(default_factory=lambda: [Exception])
+    custom_delays: Optional[List[float]] = None
+    
+    def calculate_delay(self, attempt: int) -> float:
+        """Calculate delay for given attempt number"""
+        if self.strategy == RetryStrategy.FIXED:
+            delay = self.base_delay
+        elif self.strategy == RetryStrategy.LINEAR:
+            delay = self.base_delay * attempt
+        elif self.strategy == RetryStrategy.EXPONENTIAL:
+            delay = self.base_delay * (self.backoff_factor ** (attempt - 1))
+        elif self.strategy == RetryStrategy.FIBONACCI:
+            delay = self.base_delay * self._fibonacci(attempt)
+        elif self.strategy == RetryStrategy.CUSTOM and self.custom_delays:
+            delay = self.custom_delays[min(attempt - 1, len(self.custom_delays) - 1)]
+        else:
+            delay = self.base_delay
+        
+        # Apply maximum delay limit
+        delay = min(delay, self.max_delay)
+        
+        # Apply jitter if enabled
+        if self.jitter:
+            jitter_amount = delay * self.jitter_range
+            delay += random.uniform(-jitter_amount, jitter_amount)
+        
+        return max(0, delay)
+    
+    def _fibonacci(self, n: int) -> int:
+        """Calculate nth Fibonacci number"""
+        if n <= 1:
+            return n
+        a, b = 0, 1
+        for _ in range(2, n + 1):
+            a, b = b, a + b
+        return b
+
+
+@dataclass
+class TaskResult:
+    """Result of task execution"""
+    task_id: str
+    status: TaskStatus
+    result: Any = None
+    error: Optional[Exception] = None
+    attempts: int = 0
+    total_duration: float = 0.0
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class AutomationTask:
+    """Base automation task configuration"""
+    task_id: str = field(default_factory=lambda: f"task_{int(time.time() * 1000)}_{random.randint(1000, 9999)}")
+    enabled: bool = True
     priority: int = 1  # 1=high, 2=medium, 3=low
     last_run: Optional[datetime] = None
     next_run: Optional[datetime] = None
-    enabled: bool = True
+    retry_config: RetryConfig = field(default_factory=RetryConfig)
+    timeout: Optional[float] = 300.0  # 5 minutes default timeout
+    
+    def __post_init__(self):
+        if not self.task_id:
+            self.task_id = f"task_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
+
+
+@dataclass
+class SearchTask(AutomationTask):
+    """Individual search task configuration"""
+    location: str = ""
+    business_type: Optional[str] = None
+    limit: int = 50
     
 
 @dataclass
@@ -64,6 +163,186 @@ class AutomationConfig:
     completion_callback: Optional[Callable] = None
 
 
+class SmartRetryMechanism:
+    """Smart retry mechanism with various strategies"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        self.error_handler = ErrorHandler()
+        
+        # Retry statistics
+        self.retry_stats: Dict[str, Dict[str, Any]] = {}
+    
+    @error_handler_decorator(
+        category=ErrorCategory.AUTOMATION,
+        severity=ErrorSeverity.MEDIUM,
+        show_dialog=False
+    )
+    def execute_with_retry(
+        self,
+        task: SearchTask,
+        execute_func: Callable,
+        progress_callback: Optional[Callable[[int, str], None]] = None
+    ) -> TaskResult:
+        """Execute task with smart retry mechanism
+        
+        Args:
+            task: Task to execute
+            execute_func: Function to execute
+            progress_callback: Optional callback for progress updates
+            
+        Returns:
+            TaskResult with execution details
+        """
+        task_result = TaskResult(
+            task_id=task.task_id,
+            status=TaskStatus.PENDING,
+            started_at=datetime.now()
+        )
+        
+        start_time = time.time()
+        
+        for attempt in range(1, task.retry_config.max_attempts + 1):
+            try:
+                task_result.attempts = attempt
+                task_result.status = TaskStatus.RUNNING
+                
+                if progress_callback:
+                    progress_callback(attempt, f"Attempt {attempt}/{task.retry_config.max_attempts}")
+                
+                # Execute the task
+                result = execute_func()
+                
+                # Success!
+                task_result.status = TaskStatus.SUCCESS
+                task_result.result = result
+                task_result.completed_at = datetime.now()
+                task_result.total_duration = time.time() - start_time
+                
+                self._update_retry_stats(task.task_id, attempt, True)
+                
+                self.logger.info(
+                    f"Task {task.task_id} succeeded on attempt {attempt}"
+                )
+                
+                return task_result
+                
+            except Exception as e:
+                # Check if this exception should trigger a retry
+                should_retry = self._should_retry(e, task.retry_config, attempt)
+                
+                if should_retry and attempt < task.retry_config.max_attempts:
+                    task_result.status = TaskStatus.RETRYING
+                    
+                    # Calculate delay for next attempt
+                    delay = task.retry_config.calculate_delay(attempt)
+                    
+                    self.logger.warning(
+                        f"Task {task.task_id} failed on attempt {attempt}: {e}. "
+                        f"Retrying in {delay:.2f} seconds..."
+                    )
+                    
+                    if progress_callback:
+                        progress_callback(
+                            attempt, 
+                            f"Failed attempt {attempt}. Retrying in {delay:.1f}s..."
+                        )
+                    
+                    # Wait before retry
+                    time.sleep(delay)
+                    
+                else:
+                    # Max retries exceeded or non-retryable error
+                    task_result.status = TaskStatus.FAILED
+                    task_result.error = e
+                    task_result.completed_at = datetime.now()
+                    task_result.total_duration = time.time() - start_time
+                    
+                    self._update_retry_stats(task.task_id, attempt, False)
+                    
+                    self.logger.error(
+                        f"Task {task.task_id} failed after {attempt} attempts: {e}"
+                    )
+                    
+                    # Handle the error through error handler
+                    self.error_handler.handle_error(
+                        e,
+                        severity=ErrorSeverity.HIGH,
+                        category=ErrorCategory.AUTOMATION,
+                        context={
+                            "task_id": task.task_id,
+                            "location": task.location,
+                            "business_type": task.business_type,
+                            "attempts": attempt,
+                            "max_attempts": task.retry_config.max_attempts
+                        },
+                        user_action=f"Executing automated search: {task.location}",
+                        show_dialog=False
+                    )
+                    
+                    return task_result
+        
+        # This should never be reached, but just in case
+        task_result.status = TaskStatus.FAILED
+        task_result.completed_at = datetime.now()
+        task_result.total_duration = time.time() - start_time
+        return task_result
+    
+    def _should_retry(self, exception: Exception, config: RetryConfig, attempt: int) -> bool:
+        """Determine if exception should trigger a retry"""
+        # Check if we've exceeded max attempts
+        if attempt >= config.max_attempts:
+            return False
+        
+        # Check if exception type is in retry list
+        for exc_type in config.retry_on_exceptions:
+            if isinstance(exception, exc_type):
+                return True
+        
+        return False
+    
+    def _update_retry_stats(self, task_id: str, attempts: int, success: bool) -> None:
+        """Update retry statistics"""
+        if task_id not in self.retry_stats:
+            self.retry_stats[task_id] = {
+                "total_executions": 0,
+                "total_attempts": 0,
+                "successes": 0,
+                "failures": 0,
+                "avg_attempts": 0.0,
+                "last_execution": None
+            }
+        
+        stats = self.retry_stats[task_id]
+        stats["total_executions"] += 1
+        stats["total_attempts"] += attempts
+        stats["last_execution"] = datetime.now().isoformat()
+        
+        if success:
+            stats["successes"] += 1
+        else:
+            stats["failures"] += 1
+        
+        stats["avg_attempts"] = stats["total_attempts"] / stats["total_executions"]
+    
+    def get_retry_statistics(self) -> Dict[str, Any]:
+        """Get comprehensive retry statistics"""
+        total_executions = sum(stats["total_executions"] for stats in self.retry_stats.values())
+        total_attempts = sum(stats["total_attempts"] for stats in self.retry_stats.values())
+        total_successes = sum(stats["successes"] for stats in self.retry_stats.values())
+        total_failures = sum(stats["failures"] for stats in self.retry_stats.values())
+        
+        return {
+            "total_executions": total_executions,
+            "total_attempts": total_attempts,
+            "total_successes": total_successes,
+            "total_failures": total_failures,
+            "success_rate": total_successes / total_executions if total_executions > 0 else 0,
+            "avg_attempts_per_execution": total_attempts / total_executions if total_executions > 0 else 0,
+            "task_stats": self.retry_stats
+        }
+
+
 class AutomationEngine:
     """Continuous automation engine for business lead generation"""
     
@@ -75,6 +354,8 @@ class AutomationEngine:
         # Core components
         self.scraper = BusinessScraper()
         self.analyzer = WebsiteAnalyzer()
+        self.retry_mechanism = SmartRetryMechanism()
+        self.error_handler = ErrorHandler()
         
         # State management
         self.status = AutomationStatus.STOPPED
@@ -85,6 +366,9 @@ class AutomationEngine:
         self.total_leads_found = 0
         self.daily_searches = 0
         self.last_reset_date = datetime.now().date()
+        
+        # Task results tracking
+        self.task_results: Dict[str, TaskResult] = {}
         
         # Threading
         self._stop_event = threading.Event()
@@ -160,20 +444,44 @@ class AutomationEngine:
         runtime = None
         if self.start_time:
             runtime = datetime.now() - self.start_time
+        
+        # Calculate success rate from task results
+        successful_tasks = sum(1 for result in self.task_results.values() if result.status == TaskStatus.SUCCESS)
+        total_completed_tasks = len(self.task_results)
+        success_rate = successful_tasks / total_completed_tasks if total_completed_tasks > 0 else 0
+        
+        # Get retry statistics
+        retry_stats = self.retry_mechanism.get_retry_statistics()
             
         return {
             'status': self.status.value,
             'current_task': {
                 'location': self.current_task.location if self.current_task else None,
-                'business_type': self.current_task.business_type if self.current_task else None
+                'business_type': self.current_task.business_type if self.current_task else None,
+                'task_id': self.current_task.task_id if self.current_task else None
             },
             'statistics': {
                 'total_leads_found': self.total_leads_found,
                 'daily_searches': self.daily_searches,
                 'error_count': self.error_count,
                 'runtime_minutes': runtime.total_seconds() / 60 if runtime else 0,
-                'tasks_remaining': len([t for t in self.tasks if t.enabled])
+                'tasks_remaining': len([t for t in self.tasks if t.enabled]),
+                'completed_tasks': total_completed_tasks,
+                'successful_tasks': successful_tasks,
+                'success_rate': success_rate,
+                'avg_attempts_per_task': retry_stats.get('avg_attempts_per_execution', 0)
             },
+            'retry_statistics': retry_stats,
+            'recent_task_results': [
+                {
+                    'task_id': result.task_id,
+                    'status': result.status.value,
+                    'attempts': result.attempts,
+                    'duration': result.total_duration,
+                    'completed_at': result.completed_at.isoformat() if result.completed_at else None
+                }
+                for result in list(self.task_results.values())[-10:]  # Last 10 results
+            ],
             'next_task_time': self._get_next_task_time()
         }
         
@@ -223,11 +531,12 @@ class AutomationEngine:
                 self.config.completion_callback(self.get_status())
                 
     def _execute_task(self, task: SearchTask) -> None:
-        """Execute a single search task"""
+        """Execute a single search task with smart retry mechanism"""
         self.current_task = task
         task.last_run = datetime.now()
         
-        try:
+        def execute_search_logic() -> Dict[str, Any]:
+            """Core search logic to be executed with retry"""
             self.logger.info(f"Executing task: {task.location} - {task.business_type}")
             
             # Perform search
@@ -238,6 +547,8 @@ class AutomationEngine:
             )
             
             new_leads = 0
+            processed_businesses = []
+            
             for business in businesses:
                 # Check if business already exists
                 if self.config.skip_analyzed_businesses:
@@ -256,6 +567,7 @@ class AutomationEngine:
                 # Add to database
                 business_id = self.database.add_business(business)
                 new_leads += 1
+                processed_businesses.append(business)
                 
                 # Analyze website if enabled
                 if self.config.auto_analyze_websites and business.get('website'):
@@ -264,35 +576,78 @@ class AutomationEngine:
                         self.database.update_business_analysis(business_id, analysis)
                     except Exception as e:
                         self.logger.warning(f"Website analysis failed for {business['website']}: {e}")
-                        
+            
+            return {
+                'new_leads': new_leads,
+                'processed_businesses': processed_businesses,
+                'total_found': len(businesses)
+            }
+        
+        # Execute with retry mechanism
+        def progress_callback(attempt: int, message: str):
+            if self.config.progress_callback:
+                self.config.progress_callback({
+                    'task': task,
+                    'attempt': attempt,
+                    'message': message,
+                    'total_leads': self.total_leads_found
+                })
+        
+        task_result = self.retry_mechanism.execute_with_retry(
+            task=task,
+            execute_func=execute_search_logic,
+            progress_callback=progress_callback
+        )
+        
+        # Store task result
+        self.task_results[task.task_id] = task_result
+        
+        if task_result.status == TaskStatus.SUCCESS:
+            # Task succeeded
+            result_data = task_result.result
+            new_leads = result_data['new_leads']
+            
             self.total_leads_found += new_leads
             self.daily_searches += 1
             
             # Schedule next run
             task.next_run = datetime.now() + timedelta(minutes=self.config.search_interval_minutes)
             
-            self.logger.info(f"Task completed: {new_leads} new leads found")
+            self.logger.info(
+                f"Task completed successfully: {new_leads} new leads found "
+                f"(attempts: {task_result.attempts}, duration: {task_result.total_duration:.2f}s)"
+            )
             
             # Progress callback
             if self.config.progress_callback:
                 self.config.progress_callback({
                     'task': task,
                     'new_leads': new_leads,
-                    'total_leads': self.total_leads_found
+                    'total_leads': self.total_leads_found,
+                    'task_result': task_result
                 })
-                
-        except Exception as e:
+        else:
+            # Task failed after all retries
             self.error_count += 1
-            self.logger.error(f"Task execution failed: {e}")
             
-            # Schedule retry (with backoff)
+            # Schedule retry with exponential backoff
             retry_delay = min(60 * (2 ** min(self.error_count, 5)), 3600)  # Max 1 hour
             task.next_run = datetime.now() + timedelta(seconds=retry_delay)
             
+            self.logger.error(
+                f"Task failed after {task_result.attempts} attempts: {task_result.error}. "
+                f"Next retry in {retry_delay} seconds."
+            )
+            
             if self.config.error_callback:
-                self.config.error_callback(f"Task failed: {task.location} - {e}")
-        finally:
-            self.current_task = None
+                self.config.error_callback({
+                    'task': task,
+                    'error': str(task_result.error),
+                    'attempts': task_result.attempts,
+                    'task_result': task_result
+                })
+        
+        self.current_task = None
             
     def _get_next_task(self) -> Optional[SearchTask]:
         """Get the next task that should be executed"""

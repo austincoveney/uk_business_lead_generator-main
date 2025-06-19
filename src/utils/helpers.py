@@ -438,3 +438,397 @@ def setup_logging(log_dir=None):
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[logging.FileHandler(log_file), logging.StreamHandler()],
     )
+
+
+def format_phone_number(phone):
+    """
+    Format a phone number consistently
+    
+    Args:
+        phone: Phone number string
+        
+    Returns:
+        Formatted phone number or original if invalid
+    """
+    if not phone:
+        return phone
+    
+    # Remove all non-digit characters
+    digits = ''.join(c for c in phone if c.isdigit())
+    
+    # Handle UK mobile numbers
+    if len(digits) == 11 and digits.startswith('07'):
+        return f"{digits[:5]} {digits[5:8]} {digits[8:]}"
+    elif len(digits) == 11:
+        return f"{digits[:5]} {digits[5:]}"
+    
+    return phone
+
+
+def extract_email_from_text(text):
+    """
+    Extract email from text (alias for extract_email)
+    
+    Args:
+        text: Text containing email
+        
+    Returns:
+        Extracted email or None
+    """
+    return extract_email(text)
+
+
+def calculate_contact_completeness(business_data):
+    """
+    Calculate how complete the contact information is
+    
+    Args:
+        business_data: Dictionary containing business information
+        
+    Returns:
+        Float between 0 and 1 representing completeness
+    """
+    if not business_data:
+        return 0.0
+    
+    fields = ['email', 'phone', 'website', 'address']
+    present_fields = sum(1 for field in fields if business_data.get(field))
+    
+    return present_fields / len(fields)
+
+
+def normalize_business_name(name):
+    """
+    Normalize business name for consistency
+    
+    Args:
+        name: Business name string
+        
+    Returns:
+        Normalized business name
+    """
+    if not name:
+        return name
+    
+    # Remove extra whitespace and title case
+    normalized = ' '.join(name.split()).title()
+    
+    # Remove common suffixes for comparison
+    suffixes = ['Ltd', 'Limited', 'Plc', 'Inc', 'Corp', 'Co']
+    for suffix in suffixes:
+        if normalized.endswith(f' {suffix}'):
+            normalized = normalized[:-len(suffix)-1]
+    
+    return normalized
+
+
+def is_valid_email(email):
+    """
+    Validate email format
+    
+    Args:
+        email: Email string to validate
+        
+    Returns:
+        Boolean indicating if email is valid
+    """
+    if not email:
+        return False
+    
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return bool(re.match(pattern, email))
+
+
+def get_domain_from_url(url):
+    """
+    Extract domain from URL
+    
+    Args:
+        url: URL string
+        
+    Returns:
+        Domain string or None
+    """
+    if not url:
+        return None
+    
+    try:
+        parsed = urlparse(url)
+        return parsed.netloc.lower()
+    except Exception:
+        return None
+
+
+def format_address(address):
+    """
+    Format address consistently
+    
+    Args:
+        address: Address string
+        
+    Returns:
+        Formatted address
+    """
+    if not address:
+        return address
+    
+    # Clean up whitespace and capitalize properly
+    return ' '.join(word.capitalize() for word in address.split())
+
+
+def clean_text(text):
+    """
+    Clean text by removing extra whitespace and special characters
+    
+    Args:
+        text: Text to clean
+        
+    Returns:
+        Cleaned text
+    """
+    if not text:
+        return text
+    
+    # Remove extra whitespace
+    cleaned = ' '.join(text.split())
+    
+    # Remove common unwanted characters
+    cleaned = re.sub(r'[\r\n\t]', ' ', cleaned)
+    
+    return cleaned.strip()
+
+
+def validate_postcode(postcode):
+    """
+    Validate UK postcode format
+    
+    Args:
+        postcode: Postcode string
+        
+    Returns:
+        Boolean indicating if postcode is valid
+    """
+    if not postcode:
+        return False
+    
+    # UK postcode pattern
+    pattern = r'^[A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2}$'
+    return bool(re.match(pattern, postcode.upper().strip()))
+
+
+def extract_social_media_links(text):
+    """
+    Extract social media links from text
+    
+    Args:
+        text: Text containing potential social media links
+        
+    Returns:
+        List of social media links
+    """
+    if not text:
+        return []
+    
+    social_patterns = [
+        r'https?://(?:www\.)?facebook\.com/[\w\.-]+',
+        r'https?://(?:www\.)?twitter\.com/[\w\.-]+',
+        r'https?://(?:www\.)?linkedin\.com/[\w\.-/]+',
+        r'https?://(?:www\.)?instagram\.com/[\w\.-]+'
+    ]
+    
+    links = []
+    for pattern in social_patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        links.extend(matches)
+    
+    return links
+
+
+def calculate_priority_score(business_data):
+    """
+    Calculate priority score for business lead
+    
+    Args:
+        business_data: Dictionary containing business information
+        
+    Returns:
+        Priority score (higher is better)
+    """
+    if not business_data:
+        return 0
+    
+    score = 0
+    
+    # Contact completeness (40% of score)
+    completeness = calculate_contact_completeness(business_data)
+    score += completeness * 40
+    
+    # Website quality (30% of score)
+    if business_data.get('website'):
+        score += 30
+    
+    # Performance scores (30% of score)
+    performance_score = business_data.get('performance_score', 0)
+    score += (performance_score / 100) * 30
+    
+    return min(100, score)
+
+
+def format_currency(amount, currency='GBP'):
+    """
+    Format currency amount
+    
+    Args:
+        amount: Numeric amount
+        currency: Currency code
+        
+    Returns:
+        Formatted currency string
+    """
+    if amount is None:
+        return ''
+    
+    try:
+        amount = float(amount)
+        if currency == 'GBP':
+            return f'£{amount:,.2f}'
+        else:
+            return f'{amount:,.2f} {currency}'
+    except (ValueError, TypeError):
+         return str(amount)
+
+
+def parse_opening_hours(hours_text):
+    """
+    Parse opening hours text into structured format
+    
+    Args:
+        hours_text: Text containing opening hours
+        
+    Returns:
+        Dictionary with parsed opening hours
+    """
+    if not hours_text:
+        return {}
+    
+    # Simple parsing - can be enhanced
+    days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+    parsed = {}
+    
+    text_lower = hours_text.lower()
+    
+    # Check for common patterns
+    if 'closed' in text_lower:
+        return {'status': 'closed'}
+    elif '24 hours' in text_lower or '24/7' in text_lower:
+        return {'status': '24_hours'}
+    
+    return {'raw': hours_text, 'status': 'unknown'}
+
+
+def get_file_size_mb(file_path):
+    """
+    Get file size in megabytes
+    
+    Args:
+        file_path: Path to file
+        
+    Returns:
+        File size in MB or 0 if file doesn't exist
+    """
+    try:
+        size_bytes = os.path.getsize(file_path)
+        return size_bytes / (1024 * 1024)
+    except (OSError, FileNotFoundError):
+        return 0
+
+
+def create_backup_filename(original_filename):
+    """
+    Create backup filename with timestamp
+    
+    Args:
+        original_filename: Original filename
+        
+    Returns:
+        Backup filename with timestamp
+    """
+    if not original_filename:
+        return original_filename
+    
+    from datetime import datetime
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    # Split filename and extension
+    if '.' in original_filename:
+        name, ext = original_filename.rsplit('.', 1)
+        return f"{name}_backup_{timestamp}.{ext}"
+    else:
+        return f"{original_filename}_backup_{timestamp}"
+
+
+def sanitize_filename(filename):
+    """
+    Sanitize filename by removing invalid characters
+    
+    Args:
+        filename: Original filename
+        
+    Returns:
+        Sanitized filename
+    """
+    if not filename:
+        return filename
+    
+    # Remove invalid characters for Windows/Unix
+    invalid_chars = '<>:"/\\|?*'
+    sanitized = ''.join(c for c in filename if c not in invalid_chars)
+    
+    # Remove leading/trailing spaces and dots
+    sanitized = sanitized.strip(' .')
+    
+    return sanitized or 'unnamed_file'
+
+
+def get_memory_usage_mb():
+    """
+    Get current memory usage in megabytes
+    
+    Returns:
+        Memory usage in MB
+    """
+    try:
+        import psutil
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        return memory_info.rss / (1024 * 1024)
+    except ImportError:
+        return 0
+
+
+def format_duration(seconds):
+    """
+    Format duration in seconds to human readable format
+    
+    Args:
+        seconds: Duration in seconds
+        
+    Returns:
+        Formatted duration string
+    """
+    if seconds is None:
+        return ''
+    
+    try:
+        seconds = float(seconds)
+        
+        if seconds < 60:
+            return f"{seconds:.1f}s"
+        elif seconds < 3600:
+            minutes = seconds / 60
+            return f"{minutes:.1f}m"
+        else:
+            hours = seconds / 3600
+            return f"{hours:.1f}h"
+    except (ValueError, TypeError):
+        return str(seconds)

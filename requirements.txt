@@ -1,46 +1,103 @@
-# UK Business Lead Generator - Requirements
-# Core dependencies for web scraping and data processing
-requests>=2.31.0,<3.0.0
-beautifulsoup4>=4.12.2,<5.0.0
-lxml>=4.9.3,<5.0.0
-selenium>=4.15.0,<5.0.0
-webdriver-manager>=4.0.1,<5.0.0
+PyQt5==5.15.9
+requests==2.31.0
+beautifulsoup4==4.12.2
+selenium==4.11.2
+lxml==4.9.3
+openpyxl==3.1.2
+webdriver-manager==3.8.6
+lighthouse==0.1.0
+psutil==5.9.5
 
-# GUI framework
-PySide6>=6.6.0,<7.0.0
+# Type checking and code quality
+mypy==1.5.1
+types-requests==2.31.0.2
+types-beautifulsoup4==4.12.0.6
 
-# Data processing and analysis
-pandas>=2.1.3,<3.0.0
-numpy>=1.25.2,<2.0.0
+# Phone number validation
+phonennumbers==8.13.19
 
-# System monitoring and utilities
-psutil>=5.9.6,<6.0.0
-validators>=0.22.0,<1.0.0
-fuzzywuzzy>=0.18.0,<1.0.0
-python-Levenshtein>=0.23.0,<1.0.0
+# Enhanced data handling
+dataclasses-json==0.5.14
+pydantic==2.3.0
 
-# Enhanced web analysis (optional)
-lighthouse>=2.0.0,<3.0.0
-pyppeteer>=1.0.2,<2.0.0
+# Performance and monitoring
+psutil==5.9.5
+memory-profiler==0.61.0
 
-# Testing framework
-pytest>=7.4.3,<8.0.0
-pytest-qt>=4.2.0,<5.0.0
-pytest-cov>=4.1.0,<5.0.0
-pytest-mock>=3.12.0,<4.0.0
+# Caching
+diskcache==5.6.3
 
-# Code quality and formatting
-black>=23.11.0,<24.0.0
-flake8>=6.1.0,<7.0.0
-isort>=5.12.0,<6.0.0
-mypy>=1.7.1,<2.0.0
-pre-commit>=3.5.0,<4.0.0
+# Advanced logging
+coloredlogs==15.0.1
+structlog==23.1.0
+
+# Testing enhancements
+pytest==7.4.0
+pytest-cov==4.1.0
+pytest-mock==3.11.1
+pytest-asyncio==0.21.1
+
+# Development tools
+black==23.7.0
+flake8==6.0.0
+isort==5.12.0
+pre-commit==3.3.3
 
 # Documentation
-sphinx>=7.2.6,<8.0.0
-sphinx-rtd-theme>=1.3.0,<2.0.0
+sphinx==7.1.2
+sphinx-rtd-theme==1.3.0
 
-# Additional utilities
-colorama>=0.4.6,<1.0.0  # For colored terminal output
-tqdm>=4.66.0,<5.0.0     # For progress bars
-click>=8.1.0,<9.0.0     # For CLI interface
+# Security
+bandit==1.7.5
+safety==2.3.4
+
+# Configuration management
+python-dotenv==1.0.0
+toml==0.10.2
+
+# Database enhancements (optional)
+sqlalchemy==2.0.19
+alembic==1.11.2
+
+# API enhancements (optional)
+fastapi==0.101.1
+uvicorn==0.23.2
+
+# Async support
+aiohttp==3.8.5
+aiofiles==23.2.1
+
+# Data validation
+cerberus==1.3.5
+voluptuous==0.13.1
+
+# Retry mechanisms
+tenacity==8.2.3
+backoff==2.2.1
+
+# Progress bars and UI enhancements
+tqdm==4.66.1
+rich==13.5.2
+
+# File handling
+watchdog==3.0.0
+send2trash==1.8.2
+
+# Network utilities
+urllib3==2.0.4
+certifi==2023.7.22
+
+# Date/time utilities
+python-dateutil==2.8.2
+pytz==2023.3
+
+# JSON handling
+orjson==3.9.5
+ujson==5.8.0
+
+# Compression
+zstandard==0.21.0
+
+# System utilities
+click==8.1.7
+colorama==0.4.6

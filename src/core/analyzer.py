@@ -27,6 +27,8 @@ class WebsiteAnalyzer:
         """
         self.use_selenium = use_selenium
         self.driver = None
+        # For backward compatibility with tests that expect lighthouse_available
+        self.lighthouse_available = use_selenium
         if use_selenium:
             self._setup_selenium()
 

@@ -10,12 +10,14 @@ from urllib.parse import quote_plus, unquote
 from bs4 import BeautifulSoup
 from .contact_extractor import ContactExtractor
 from ..utils.business_size_detector import BusinessSizeDetector
+from ..utils.timing_config import get_timing_manager
 
 
 class BusinessScraper:
     """Class for scraping business data from various online sources"""
     
     def __init__(self, use_selenium=False):
+        self.timing_manager = get_timing_manager()
         """
         Initialize the scraper
         
@@ -77,7 +79,7 @@ class BusinessScraper:
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
             # Add a delay
-            time.sleep(1)
+            time.sleep(self.timing_manager.config.scraping.selenium_init_delay)
             
             print("Selenium WebDriver set up successfully")
             
@@ -106,7 +108,9 @@ class BusinessScraper:
         if category:
             search_query = f"{category} in {location}"
         else:
+            # For general area searches, use multiple query variations
             search_query = f"businesses in {location}"
+            print(f"General area search - will try multiple query variations")
         
         print(f"Starting search for: {search_query}")
         print(f"Location variants: {location_variants}")
@@ -153,8 +157,34 @@ class BusinessScraper:
                 
                 # Deduplicate based on name and partial address
                 for business in businesses:
-                    # Only add if we don't already have a business with the same name
-                    if not any(b['name'].lower() == business['name'].lower() for b in all_businesses):
+                    # Check for duplicates using name and address similarity
+                    is_duplicate = False
+                    business_name_lower = business['name'].lower().strip()
+                    business_address = business.get('address', '').lower().strip()
+                    
+                    for existing in all_businesses:
+                        existing_name_lower = existing['name'].lower().strip()
+                        existing_address = existing.get('address', '').lower().strip()
+                        
+                        # Check if names are identical or very similar
+                        if business_name_lower == existing_name_lower:
+                            is_duplicate = True
+                            break
+                        
+                        # Check if names are similar and addresses match partially
+                        if (business_address and existing_address and 
+                            len(business_address) > 10 and len(existing_address) > 10):
+                            # Check if addresses share significant common parts
+                            if (business_address in existing_address or 
+                                existing_address in business_address or
+                                len(set(business_address.split()) & set(existing_address.split())) > 2):
+                                # If addresses are similar, check name similarity
+                                if (business_name_lower in existing_name_lower or 
+                                    existing_name_lower in business_name_lower):
+                                    is_duplicate = True
+                                    break
+                    
+                    if not is_duplicate:
                         # Process and clean business data
                         business = self._process_found_business(business)
                         if business:
@@ -165,16 +195,51 @@ class BusinessScraper:
                             break
                 
                 # Add a longer delay between sources
-                time.sleep(random.uniform(1, 3))
+                min_delay = self.timing_manager.config.scraping.request_delay
+                max_delay = min_delay * 3
+                time.sleep(random.uniform(min_delay, max_delay))
                 
             except Exception as e:
-                print(f"Error in {source_func.__name__}: {e}")
+                # Only log unique errors to avoid spam
+                error_key = f"{source_func.__name__}:{str(e)[:50]}"
+                if not hasattr(self, '_logged_errors'):
+                    self._logged_errors = set()
+                if error_key not in self._logged_errors:
+                    print(f"Error in {source_func.__name__}: {e}")
+                    self._logged_errors.add(error_key)
         
         print(f"Total businesses found: {len(all_businesses)}")
         
         # If we didn't find any businesses, try enhanced fallback searches
         if not all_businesses and limit > 0:
             print("No businesses found with specific search. Trying enhanced fallback searches...")
+            
+            # For general area searches (no category), try multiple broad search terms
+            if not category:
+                general_search_terms = [
+                    f"companies in {location}",
+                    f"local business {location}",
+                    f"services {location}",
+                    f"shops {location}",
+                    f"directory {location}",
+                    f"business listings {location}"
+                ]
+                
+                for search_term in general_search_terms:
+                    if len(all_businesses) >= limit:
+                        break
+                    
+                    try:
+                        print(f"Trying general search: {search_term}")
+                        general_businesses = self._search_google(search_term, limit - len(all_businesses))
+                        if general_businesses:
+                            # Filter businesses to ensure they're actually in the target location
+                            filtered_businesses = self._filter_businesses_by_location(general_businesses, location)
+                            all_businesses.extend(filtered_businesses)
+                            print(f"Found {len(filtered_businesses)} relevant businesses with general search")
+                            
+                    except Exception as e:
+                        print(f"General search failed for {search_term}: {e}")
             
             # Try searches with location variants
             for variant in location_variants[:3]:  # Try up to 3 variants
@@ -328,17 +393,12 @@ class BusinessScraper:
             business['size_confidence'] = confidence
             business['size_reasoning'] = reasoning
             
-            # Estimate employee count based on size category
-            employee_ranges = {
-                'Small': 25,
-                'Medium': 150,
-                'Large': 500,
-                'Enterprise': 2000
-            }
-            business['employee_count'] = employee_ranges.get(size_category, 25)
+            # Use the detector's employee count estimation method
+            if 'employee_count' not in business or business['employee_count'] == 0:
+                business['employee_count'] = self.business_size_detector.estimate_employee_count(size_category)
             
             print(f"Detected business size for {business['name']}: {size_category} (confidence: {confidence}%)")
-        except Exception as e:
+        except (AttributeError, ValueError, KeyError) as e:
             print(f"Error detecting business size for {business['name']}: {e}")
             business['business_size'] = 'Unknown'
             business['employee_count'] = 0
@@ -611,7 +671,7 @@ class BusinessScraper:
                         EC.presence_of_element_located((By.CSS_SELECTOR, "[data-result-index]"))
                     )
                 except TimeoutException:
-                    time.sleep(3)  # Fallback to shorter sleep
+                    time.sleep(self.timing_manager.config.scraping.page_load_delay)  # Fallback to shorter sleep
                 
                 # Print page source debug
                 page_source = self.driver.page_source
@@ -766,7 +826,7 @@ class BusinessScraper:
                             # Try to click on the element to get more details
                             try:
                                 element.click()
-                                time.sleep(2)
+                                time.sleep(self.timing_manager.config.scraping.element_interaction_delay)
                                 
                                 # Extract website
                                 website_buttons = self.driver.find_elements("xpath", "//a[contains(@href, 'http') and @data-item-id='authority' or contains(@href, 'website')]")
@@ -784,13 +844,13 @@ class BusinessScraper:
                                 
                                 # Go back
                                 self.driver.back()
-                                time.sleep(1)
+                                time.sleep(self.timing_manager.config.scraping.navigation_delay)
                             except Exception as e:
                                 print(f"Error getting details: {e}")
                                 # Try to recover
                                 try:
                                     self.driver.get(url)
-                                    time.sleep(3)
+                                    time.sleep(self.timing_manager.config.scraping.page_load_delay)
                                 except (WebDriverException, TimeoutException):
                                     pass
                             
@@ -1049,7 +1109,13 @@ class BusinessScraper:
                                 print(f"Found {len(business_elements)} elements with selector: {selector}")
                                 break
                         except Exception as e:
-                            print(f"Selector {selector} failed: {e}")
+                            # Reduce selector error spam
+                            if not hasattr(self, '_selector_errors'):
+                                self._selector_errors = set()
+                            selector_key = f"{selector}:{str(e)[:30]}"
+                            if selector_key not in self._selector_errors:
+                                print(f"Selector {selector} failed: {e}")
+                                self._selector_errors.add(selector_key)
                     
                     for element in business_elements[:limit]:
                         try:
@@ -1068,6 +1134,7 @@ class BusinessScraper:
                                     if name:
                                         break
                                 except (NoSuchElementException, StaleElementReferenceException, WebDriverException):
+                                    # Silently continue to next selector without logging
                                     continue
                             
                             if not name:
@@ -1092,6 +1159,7 @@ class BusinessScraper:
                                         business['address'] = address
                                         break
                                 except (NoSuchElementException, StaleElementReferenceException, WebDriverException):
+                                    # Silently continue to next selector
                                     continue
                             
                             # Extract phone
@@ -1109,7 +1177,8 @@ class BusinessScraper:
                                     if phone:
                                         business['phone'] = phone
                                         break
-                                except:
+                                except (AttributeError, ValueError, IndexError) as e:
+                                    # Skip invalid elements and continue with next
                                     continue
                             
                             # Extract website
@@ -1132,7 +1201,7 @@ class BusinessScraper:
                                     
                                     business['website'] = website_url
                                     break
-                                except:
+                                except (AttributeError, ValueError, IndexError):
                                     continue
                             
                             # Extract business type
@@ -1149,8 +1218,9 @@ class BusinessScraper:
                                     if business_type:
                                         business['business_type'] = business_type
                                         break
-                                except:
-                                    continue
+                                except (AttributeError, ValueError, IndexError):
+                                    pass
+                            continue
                             
                             if 'business_type' not in business and what != "businesses":
                                 business['business_type'] = what
@@ -2047,7 +2117,7 @@ class BusinessScraper:
                                 name = name_elem.text.strip()
                                 if name:
                                     break
-                            except:
+                            except (AttributeError, ValueError, IndexError):
                                 continue
                         
                         if not name:

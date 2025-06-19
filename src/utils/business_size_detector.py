@@ -210,11 +210,14 @@ class BusinessSizeDetector:
         Estimate employee count based on business size category
         
         Args:
-            business_size: Size category (Small, Medium, Large, Enterprise)
+            business_size: Size category (Small, Medium, Large, Enterprise, Unknown)
             
         Returns:
             Estimated employee count (midpoint of range)
         """
+        if business_size == 'Unknown':
+            return 10  # Conservative estimate for unknown businesses
+        
         if business_size in self.employee_ranges:
             min_emp, max_emp = self.employee_ranges[business_size]
             if max_emp == float('inf'):

@@ -96,18 +96,22 @@ class ExportManager:
         
         fieldnames = sorted(list(all_keys))
         
-        with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore')
-            
-            # Write header comment with search parameters
-            if search_params:
-                csvfile.write(f"# Export generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                csvfile.write(f"# Search location: {search_params.get('location', 'N/A')}\n")
-                csvfile.write(f"# Business type: {search_params.get('business_type', 'N/A')}\n")
-                csvfile.write(f"# Total results: {len(data)}\n")
-                csvfile.write("#\n")
-            
-            writer.writeheader()
+        try:
+            with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore')
+                
+                # Write header comment with search parameters
+                if search_params:
+                    csvfile.write(f"# Export generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    csvfile.write(f"# Search location: {search_params.get('location', 'N/A')}\n")
+                    csvfile.write(f"# Business type: {search_params.get('business_type', 'N/A')}\n")
+                    csvfile.write(f"# Total results: {len(data)}\n")
+                    csvfile.write("#\n")
+                
+                writer.writeheader()
+        except (PermissionError, OSError, IOError) as e:
+            print(f"Error writing CSV file {file_path}: {e}")
+            raise
             
             # Write data with error handling for individual rows
             for i, record in enumerate(data):
@@ -190,8 +194,9 @@ class ExportManager:
                 try:
                     if len(str(cell.value)) > max_length:
                         max_length = len(str(cell.value))
-                except:
-                    pass
+                except (AttributeError, TypeError) as e:
+                    # Skip cells with invalid values
+                    continue
             adjusted_width = min(max_length + 2, 50)
             ws.column_dimensions[column_letter].width = adjusted_width
         

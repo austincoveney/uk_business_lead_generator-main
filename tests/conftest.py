@@ -51,5 +51,5 @@ def mock_scraper():
 @pytest.fixture
 def mock_analyzer():
     """Fixture for mocked analyzer"""
-    analyzer = WebsiteAnalyzer(use_lighthouse=False)
+    analyzer = WebsiteAnalyzer(use_selenium=False)
     return analyzer

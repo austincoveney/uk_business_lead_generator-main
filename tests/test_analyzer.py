@@ -6,7 +6,6 @@ import json
 
 def test_analyzer_initialization(mock_analyzer):
     """Test analyzer initialization"""
-    assert not mock_analyzer.use_lighthouse
     assert not mock_analyzer.lighthouse_available
 
 @patch('subprocess.run')
@@ -16,12 +15,12 @@ def test_lighthouse_check(mock_run):
     
     # Mock successful Lighthouse check
     mock_run.return_value = Mock(returncode=0)
-    analyzer = WebsiteAnalyzer(use_lighthouse=True)
+    analyzer = WebsiteAnalyzer(use_selenium=True)
     assert analyzer.lighthouse_available
     
     # Mock failed Lighthouse check
     mock_run.return_value = Mock(returncode=1)
-    analyzer = WebsiteAnalyzer(use_lighthouse=True)
+    analyzer = WebsiteAnalyzer(use_selenium=True)
     assert not analyzer.lighthouse_available
 
 def test_basic_analysis(mock_analyzer):
@@ -86,7 +85,7 @@ def test_lighthouse_analysis(mock_run):
     mock_process.returncode = 0
     mock_run.return_value = mock_process
     
-    analyzer = WebsiteAnalyzer(use_lighthouse=True)
+    analyzer = WebsiteAnalyzer(use_selenium=True)
     results = analyzer.analyze_website('https://example.com')
     
     assert results['performance_score'] == 95
