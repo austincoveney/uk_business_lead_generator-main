@@ -2530,9 +2530,36 @@ class BusinessScraper:
         return businesses
     
     def close(self):
-        """Clean up resources"""
+        """Clean up resources with improved error handling"""
         if self.use_selenium and self.driver:
             try:
+                # Close all windows first
+                for handle in self.driver.window_handles:
+                    try:
+                        self.driver.switch_to.window(handle)
+                        self.driver.close()
+                    except:
+                        pass
+                
+                # Quit the driver
                 self.driver.quit()
-            except (WebDriverException, Exception):
-                pass
+                self.driver = None
+                logging.info("Selenium WebDriver closed successfully")
+                
+            except Exception as e:
+                logging.error(f"Error closing Selenium WebDriver: {e}")
+                # Force cleanup
+                try:
+                    if self.driver:
+                        self.driver.quit()
+                        self.driver = None
+                except:
+                    pass
+        
+        # Close requests session
+        try:
+            if hasattr(self, 'session') and self.session:
+                self.session.close()
+                logging.info("Requests session closed")
+        except Exception as e:
+            logging.error(f"Error closing requests session: {e}")

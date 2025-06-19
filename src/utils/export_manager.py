@@ -7,6 +7,7 @@ Provides data formatting and export functionality.
 import csv
 import json
 import os
+import logging
 from datetime import datetime
 from typing import List, Dict, Optional
 from pathlib import Path
@@ -76,12 +77,17 @@ class ExportManager:
             return False
     
     def _export_csv(self, data: List[Dict], file_path: str, search_params: Optional[Dict] = None) -> bool:
-        """Export data to CSV format"""
+        """Export data to CSV format with improved error handling"""
         if not data:
             return False
         
         # Ensure directory exists
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
+        # Create backup if file exists
+        if os.path.exists(file_path):
+            backup_name = f"{file_path}.backup"
+            os.rename(file_path, backup_name)
         
         # Get all unique keys from all records
         all_keys = set()
@@ -91,7 +97,7 @@ class ExportManager:
         fieldnames = sorted(list(all_keys))
         
         with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore')
             
             # Write header comment with search parameters
             if search_params:
@@ -102,7 +108,21 @@ class ExportManager:
                 csvfile.write("#\n")
             
             writer.writeheader()
-            writer.writerows(data)
+            
+            # Write data with error handling for individual rows
+            for i, record in enumerate(data):
+                try:
+                    # Convert complex data types to strings
+                    row = {}
+                    for key, value in record.items():
+                        if isinstance(value, (list, dict)):
+                            row[key] = json.dumps(value)
+                        else:
+                            row[key] = value
+                    writer.writerow(row)
+                except Exception as e:
+                    print(f"Error writing row {i}: {e}")
+                    continue
         
         return True
     
@@ -268,28 +288,79 @@ class ExportManager:
         return True
     
     def _export_json(self, data: List[Dict], file_path: str, search_params: Optional[Dict] = None) -> bool:
-        """Export data to JSON format"""
+        """Export data to JSON format with improved error handling"""
         if not data:
             return False
         
         # Ensure directory exists
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         
-        # Prepare export data
+        # Create backup if file exists
+        if os.path.exists(file_path):
+            backup_name = f"{file_path}.backup"
+            os.rename(file_path, backup_name)
+        
+        # Prepare export data with enhanced metadata
         export_data = {
             'export_info': {
                 'export_date': datetime.now().isoformat(),
-                'total_results': len(data)
+                'total_results': len(data),
+                'export_version': '2.0'
             },
             'search_parameters': search_params or {},
             'results': data
         }
         
-        # Write JSON file
-        with open(file_path, 'w', encoding='utf-8') as jsonfile:
-            json.dump(export_data, jsonfile, indent=2, ensure_ascii=False)
+        # Write JSON file with error handling
+        try:
+            with open(file_path, 'w', encoding='utf-8') as jsonfile:
+                json.dump(export_data, jsonfile, indent=2, ensure_ascii=False, default=str)
+        except PermissionError as e:
+            print(f"Permission denied writing to {file_path}: {e}")
+            return False
+        except Exception as e:
+            print(f"Error writing JSON file: {e}")
+            return False
         
         return True
+    
+    def _get_standardized_fieldnames(self, businesses):
+        """Get standardized fieldnames for CSV export"""
+        # Define preferred field order
+        preferred_fields = [
+            'name', 'website', 'phone', 'email', 'address',
+            'performance_score', 'seo_score', 'accessibility_score', 'best_practices_score',
+            'priority', 'business_type', 'description'
+        ]
+        
+        # Get all unique fields
+        all_fields = set()
+        for business in businesses:
+            all_fields.update(business.keys())
+        
+        # Order fields: preferred first, then alphabetical
+        ordered_fields = []
+        for field in preferred_fields:
+            if field in all_fields:
+                ordered_fields.append(field)
+                all_fields.remove(field)
+        
+        # Add remaining fields alphabetically
+        ordered_fields.extend(sorted(all_fields))
+        return ordered_fields
+    
+    def _prepare_csv_row(self, business, fieldnames):
+        """Prepare a business row for CSV export"""
+        row = {}
+        for field in fieldnames:
+            value = business.get(field, '')
+            if isinstance(value, (list, dict)):
+                row[field] = json.dumps(value, ensure_ascii=False)
+            elif value is None:
+                row[field] = ''
+            else:
+                row[field] = str(value)
+        return row
     
     def get_supported_formats(self) -> List[str]:
         """Get list of supported export formats

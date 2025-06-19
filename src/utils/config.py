@@ -4,16 +4,19 @@ Configuration utility for UK Business Lead Generator
 """
 import os
 import json
+import logging
 from pathlib import Path
+from typing import Dict, Any, Optional
 from PySide6.QtCore import QSettings
 
 class Config:
-    """Configuration manager"""
+    """Enhanced configuration manager with validation and error handling"""
     
     def __init__(self):
         """Initialize configuration"""
         self.settings = QSettings("UK Business Lead Generator", "LeadGen")
         self._init_default_settings()
+        self._validate_config()
     
     def _init_default_settings(self):
         """Initialize default settings if not already set"""
@@ -122,3 +125,27 @@ class Config:
     def get_default_export_format(self):
         """Get the default export format"""
         return self.get("export/default_format", "CSV")
+    
+    def _validate_config(self):
+        """Validate configuration settings"""
+        try:
+            # Validate search limit
+            limit = self.get_search_limit()
+            if not isinstance(limit, int) or limit <= 0:
+                logging.warning(f"Invalid search limit: {limit}, resetting to 20")
+                self.set("search/limit", 20)
+            
+            # Validate max threads
+            threads = self.get_max_threads()
+            if not isinstance(threads, int) or threads <= 0 or threads > 10:
+                logging.warning(f"Invalid max threads: {threads}, resetting to 3")
+                self.set("analysis/max_threads", 3)
+            
+            # Validate timeout
+            timeout = self.get_lighthouse_timeout()
+            if not isinstance(timeout, int) or timeout <= 0:
+                logging.warning(f"Invalid lighthouse timeout: {timeout}, resetting to 60")
+                self.set("analysis/lighthouse_timeout", 60)
+                
+        except Exception as e:
+            logging.error(f"Error validating config: {e}")

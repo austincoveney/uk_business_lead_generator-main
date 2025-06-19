@@ -13,8 +13,10 @@ from PySide6.QtCore import Qt, Signal, Slot, QSettings, QTimer, QSize
 from src.gui.search_panel import SearchPanel
 from src.gui.results_panel import ResultsPanel
 from src.gui.report_view import ReportView
+from src.gui.automation_panel import AutomationPanel
 from src.gui.settings_dialog import SettingsDialog
 from src.gui.theme_manager import theme_manager
+from src.core.database import LeadDatabase
 
 class MainWindow(QMainWindow):
     """Main application window"""
@@ -56,14 +58,19 @@ class MainWindow(QMainWindow):
         self.tab_widget.setElideMode(Qt.TextElideMode.ElideNone)
         self.main_layout.addWidget(self.tab_widget)
         
+        # Initialize database for automation
+        self.database = LeadDatabase()
+        
         # Create panels
         self.search_panel = SearchPanel()
         self.results_panel = ResultsPanel()
         self.report_view = ReportView()
+        self.automation_panel = AutomationPanel(self.database)
         
         # Add panels to tabs with icons
         self.tab_widget.addTab(self.search_panel, "🔍 Search")
         self.tab_widget.addTab(self.results_panel, "📊 Results")
+        self.tab_widget.addTab(self.automation_panel, "🤖 Automation")
         self.tab_widget.addTab(self.report_view, "📑 Reports")
         
         # Create toolbar
@@ -79,6 +86,10 @@ class MainWindow(QMainWindow):
         self.search_panel.search_started.connect(self.on_search_started)
         self.search_panel.search_completed.connect(self.on_search_completed)
         self.search_panel.search_error.connect(self.on_search_error)
+        
+        # Connect automation signals
+        self.automation_panel.automation_started.connect(self.on_automation_started)
+        self.automation_panel.automation_stopped.connect(self.on_automation_stopped)
         
         # Apply saved settings
         self.restore_settings()
@@ -151,10 +162,35 @@ class MainWindow(QMainWindow):
         self.memory_timer.start(10000)  # Update every 10 seconds
     
     def update_memory_usage(self):
-        """Update memory usage display"""
-        process = psutil.Process()
-        memory_mb = process.memory_info().rss / 1024 / 1024
-        self.memory_label.setText(f"Memory: {memory_mb:.1f} MB")
+        """Update memory usage display with improved monitoring"""
+        try:
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            memory_mb = memory_info.rss / 1024 / 1024
+            memory_percent = process.memory_percent()
+            
+            # Update status bar with more detailed info
+            self.memory_label.setText(f"Memory: {memory_mb:.1f} MB ({memory_percent:.1f}%)")
+            
+            # Progressive memory warnings
+            if memory_mb > 1000:  # Critical threshold
+                logging.critical(f"Critical memory usage: {memory_mb:.1f} MB ({memory_percent:.1f}%)")
+                self.memory_label.setStyleSheet("color: red; font-weight: bold;")
+            elif memory_mb > 750:  # Warning threshold
+                logging.warning(f"High memory usage: {memory_mb:.1f} MB ({memory_percent:.1f}%)")
+                self.memory_label.setStyleSheet("color: orange; font-weight: bold;")
+            elif memory_mb > 500:  # Info threshold
+                logging.info(f"Elevated memory usage: {memory_mb:.1f} MB ({memory_percent:.1f}%)")
+                self.memory_label.setStyleSheet("color: yellow;")
+            else:
+                self.memory_label.setStyleSheet("color: green;")
+                
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
+            logging.error(f"Process monitoring error: {e}")
+            self.memory_label.setText("Memory: N/A")
+        except Exception as e:
+            logging.error(f"Unexpected error updating memory usage: {e}")
+            self.memory_label.setText("Memory: Error")
     
     def restore_settings(self):
         """Restore saved window settings"""
@@ -321,6 +357,16 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Search failed.")
         QMessageBox.warning(self, "Search Error", error_message)
     
+    @Slot()
+    def on_automation_started(self):
+        """Handle automation started signal"""
+        self.status_bar.showMessage("Automation running...")
+    
+    @Slot()
+    def on_automation_stopped(self):
+        """Handle automation stopped signal"""
+        self.status_bar.showMessage("Automation stopped.")
+    
     def apply_theme(self):
         """Apply the current theme to the main window"""
         self.setStyleSheet(theme_manager.get_stylesheet())
@@ -330,6 +376,8 @@ class MainWindow(QMainWindow):
             self.search_panel.setStyleSheet(theme_manager.get_stylesheet())
         if hasattr(self, 'results_panel'):
             self.results_panel.setStyleSheet(theme_manager.get_stylesheet())
+        if hasattr(self, 'automation_panel'):
+            self.automation_panel.setStyleSheet(theme_manager.get_stylesheet())
         if hasattr(self, 'report_view'):
             self.report_view.setStyleSheet(theme_manager.get_stylesheet())
     

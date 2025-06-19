@@ -5,7 +5,9 @@ Database module for storing and retrieving business leads
 import os
 import sqlite3
 import json
+import time
 from datetime import datetime
+import logging
 
 
 class LeadDatabase:
@@ -15,19 +17,35 @@ class LeadDatabase:
         """Initialize the database connection"""
         self.db_path = db_path
         self.conn = None
+        self._connection_pool = []
+        self._max_connections = 5
         self._connect()
         self._create_tables()
     
     def _connect(self):
-        """Establish database connection"""
+        """Establish database connection with improved connection handling"""
         try:
             # Create directory if it doesn't exist
             os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
-            self.conn = sqlite3.connect(self.db_path)
+            
+            # Enable WAL mode for better concurrent access
+            self.conn = sqlite3.connect(
+                self.db_path, 
+                check_same_thread=False,
+                timeout=30.0  # 30 second timeout
+            )
             self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
+            
+            # Enable WAL mode and optimize settings
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA synchronous=NORMAL")
+            self.conn.execute("PRAGMA cache_size=10000")
+            self.conn.execute("PRAGMA temp_store=MEMORY")
+            
+            print(f"Connected to database: {self.db_path} with optimized settings")
         except sqlite3.Error as e:
             print(f"Database connection error: {e}")
-            raise
+            raise ConnectionError(f"Failed to connect to database: {e}")
     
     def _create_tables(self):
         """Create necessary database tables if they don't exist"""
@@ -702,6 +720,13 @@ class LeadDatabase:
             return False
     
     def close(self):
-        """Close the database connection"""
-        if self.conn:
-            self.conn.close()
+        """Close the database connection and cleanup resources"""
+        try:
+            if self.conn:
+                # Close any pending transactions
+                self.conn.commit()
+                self.conn.close()
+                self.conn = None
+                print("Database connection closed successfully")
+        except sqlite3.Error as e:
+            print(f"Error closing database connection: {e}")

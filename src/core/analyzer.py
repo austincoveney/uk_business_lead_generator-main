@@ -191,9 +191,8 @@ class WebsiteAnalyzer:
             # Check social media presence
             self._check_social_media(soup, results)
 
-            # Capture screenshot if using Selenium
-            if self.use_selenium and self.driver:
-                self._capture_screenshot(url, results)
+            # Screenshot functionality removed as requested
+            results["screenshots"] = {}
 
         except requests.RequestException as e:
             results["issues"].append(f"Error accessing website: {str(e)}")
@@ -289,44 +288,9 @@ class WebsiteAnalyzer:
                     results["social_media_presence"].append(platform)
 
     def _capture_screenshot(self, url, results):
-        """Capture enhanced website screenshots using Selenium"""
-        try:
-            self.driver.get(url)
-            time.sleep(2)  # Wait for page to load
-            
-            screenshots = {}
-            
-            # Desktop full page screenshot
-            self.driver.set_window_size(1920, 1080)
-            time.sleep(1)
-            screenshots['desktop_full'] = self.driver.get_screenshot_as_base64()
-            
-            # Desktop above-the-fold
-            self.driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(0.5)
-            screenshots['desktop_above_fold'] = self.driver.get_screenshot_as_base64()
-            
-            # Mobile view
-            self.driver.set_window_size(375, 667)
-            time.sleep(1)
-            self.driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(0.5)
-            screenshots['mobile'] = self.driver.get_screenshot_as_base64()
-            
-            # Tablet view
-            self.driver.set_window_size(768, 1024)
-            time.sleep(1)
-            self.driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(0.5)
-            screenshots['tablet'] = self.driver.get_screenshot_as_base64()
-            
-            # Store all screenshots
-            results["screenshots"] = screenshots
-            # Keep backward compatibility
-            results["screenshot"] = screenshots.get('desktop_full', '')
-            
-        except Exception as e:
-            results["issues"].append(f"Failed to capture screenshot: {str(e)}")
+        """Screenshot functionality removed as requested by user"""
+        results["screenshots"] = {}
+        results["screenshot"] = ""
     
     def _measure_core_web_vitals(self, results):
         """Measure Core Web Vitals using JavaScript"""
@@ -582,8 +546,8 @@ class WebsiteAnalyzer:
             # Test navigation
             self._test_navigation(results)
             
-            # Capture screenshot
-            self._capture_screenshot(url, results)
+            # Screenshot functionality removed as requested
+            results["screenshots"] = {}
             
             # Test page load performance
             self._test_page_performance(results)

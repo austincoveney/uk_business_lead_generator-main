@@ -5,10 +5,12 @@ Includes data visualization and trend analysis capabilities.
 """
 
 import json
+import logging
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
+import statistics
 
 try:
     import pandas as pd
@@ -37,6 +39,123 @@ class BusinessAnalytics:
     def __init__(self):
         self.data_cache = {}
         self.last_analysis = None
+    
+    def analyze_data(self, businesses):
+        """Analyze business data and return comprehensive insights"""
+        if not businesses:
+            return self._get_empty_analysis()
+        
+        try:
+            return self._perform_analysis(businesses)
+        except Exception as e:
+            print(f"Error in data analysis: {e}")
+            return self._get_empty_analysis()
+    
+    def _get_empty_analysis(self):
+        """Return empty analysis structure"""
+        return {
+            'total_businesses': 0,
+            'avg_performance_score': 0,
+            'avg_seo_score': 0,
+            'avg_accessibility_score': 0,
+            'avg_best_practices_score': 0,
+            'top_issues': [],
+            'score_distribution': {},
+            'recommendations': [],
+            'analysis_timestamp': datetime.now().isoformat(),
+            'data_quality': 'no_data'
+        }
+    
+    def _perform_analysis(self, businesses):
+        """Perform the actual analysis with validation"""
+        # Validate and clean data
+        valid_businesses = self._validate_business_data(businesses)
+        total = len(valid_businesses)
+        
+        if total == 0:
+            return self._get_empty_analysis()
+        
+        # Calculate averages with proper validation
+        performance_scores = self._extract_valid_scores(valid_businesses, 'performance_score')
+        seo_scores = self._extract_valid_scores(valid_businesses, 'seo_score')
+        accessibility_scores = self._extract_valid_scores(valid_businesses, 'accessibility_score')
+        best_practices_scores = self._extract_valid_scores(valid_businesses, 'best_practices_score')
+        
+        return {
+            'total_businesses': total,
+            'avg_performance_score': sum(performance_scores) / len(performance_scores) if performance_scores else 0,
+            'avg_seo_score': sum(seo_scores) / len(seo_scores) if seo_scores else 0,
+            'avg_accessibility_score': sum(accessibility_scores) / len(accessibility_scores) if accessibility_scores else 0,
+            'avg_best_practices_score': sum(best_practices_scores) / len(best_practices_scores) if best_practices_scores else 0,
+            'top_issues': self._identify_top_issues(valid_businesses),
+            'score_distribution': self._calculate_score_distribution(valid_businesses),
+            'recommendations': self._generate_score_recommendations(valid_businesses),
+            'analysis_timestamp': datetime.now().isoformat(),
+            'data_quality': 'valid'
+        }
+    
+    def _validate_business_data(self, businesses):
+        """Validate and filter business data"""
+        valid_businesses = []
+        for business in businesses:
+            if isinstance(business, dict) and business.get('name'):
+                valid_businesses.append(business)
+        return valid_businesses
+    
+    def _extract_valid_scores(self, businesses, score_field):
+        """Extract valid numeric scores from businesses"""
+        scores = []
+        for business in businesses:
+            score = business.get(score_field)
+            if isinstance(score, (int, float)) and 0 <= score <= 100:
+                scores.append(score)
+        return scores
+    
+    def _identify_top_issues(self, businesses):
+        """Identify top performance issues"""
+        issues = []
+        for business in businesses:
+            if business.get('performance_score', 0) < 50:
+                issues.append(f"Low performance: {business.get('name', 'Unknown')}")
+            if business.get('seo_score', 0) < 50:
+                issues.append(f"SEO issues: {business.get('name', 'Unknown')}")
+        return issues[:10]  # Return top 10 issues
+    
+    def _calculate_score_distribution(self, businesses):
+        """Calculate score distribution ranges"""
+        distribution = {'0-25': 0, '26-50': 0, '51-75': 0, '76-100': 0}
+        for business in businesses:
+            avg_score = sum([
+                business.get('performance_score', 0),
+                business.get('seo_score', 0),
+                business.get('accessibility_score', 0),
+                business.get('best_practices_score', 0)
+            ]) / 4
+            
+            if avg_score <= 25:
+                distribution['0-25'] += 1
+            elif avg_score <= 50:
+                distribution['26-50'] += 1
+            elif avg_score <= 75:
+                distribution['51-75'] += 1
+            else:
+                distribution['76-100'] += 1
+        return distribution
+    
+    def _generate_score_recommendations(self, businesses):
+        """Generate recommendations based on scores"""
+        recommendations = []
+        total = len(businesses)
+        
+        low_performance = sum(1 for b in businesses if b.get('performance_score', 0) < 50)
+        if low_performance > total * 0.3:
+            recommendations.append("Focus on improving website performance and loading speeds")
+        
+        low_seo = sum(1 for b in businesses if b.get('seo_score', 0) < 50)
+        if low_seo > total * 0.3:
+            recommendations.append("Implement better SEO practices and meta tags")
+        
+        return recommendations
     
     def analyze_business_data(self, businesses: List[Dict]) -> Dict[str, Any]:
         """Perform comprehensive analysis of business data

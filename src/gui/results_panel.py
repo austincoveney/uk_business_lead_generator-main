@@ -515,18 +515,9 @@ class ResultsPanel(QWidget):
         # Load businesses
         businesses = self.current_database.get_all_businesses()
         
-        # Debug: Print business data
-        print(f"\n=== DEBUG: Loading {len(businesses)} businesses ===")
-        for i, business in enumerate(businesses[:3]):  # Print first 3 businesses
-            print(f"Business {i+1}: {business.get('name', 'Unknown')}")
-            print(f"  Website: {business.get('website', 'None')}")
-            print(f"  SEO Score: {business.get('seo_score', 'None')}")
-            print(f"  Performance Score: {business.get('performance_score', 'None')}")
-            print(f"  Accessibility Score: {business.get('accessibility_score', 'None')}")
-            print(f"  Best Practices Score: {business.get('best_practices_score', 'None')}")
-            print(f"  Priority: {business.get('priority', 'None')}")
-            print(f"  Issues: {len(business.get('issues', []))} issues")
-            print("---")
+        # Log business data loading for debugging
+        import logging
+        logging.info(f"Loading {len(businesses)} businesses into results panel")
 
         # Update model
         self.model.load_data(businesses)
@@ -593,15 +584,9 @@ class ResultsPanel(QWidget):
             self.clear_details()
             return
         
-        # Debug: Print selected business data
-        print(f"\n=== DEBUG: Showing details for {business.get('name', 'Unknown')} ===")
-        print(f"  SEO Score: {business.get('seo_score', 'None')} (type: {type(business.get('seo_score'))})")
-        print(f"  Performance Score: {business.get('performance_score', 'None')} (type: {type(business.get('performance_score'))})")
-        print(f"  Accessibility Score: {business.get('accessibility_score', 'None')} (type: {type(business.get('accessibility_score'))})")
-        print(f"  Best Practices Score: {business.get('best_practices_score', 'None')} (type: {type(business.get('best_practices_score'))})")
-        print(f"  Issues: {business.get('issues', [])}")
-        print(f"  Website: {business.get('website', 'None')}")
-        print(f"  All keys in business: {list(business.keys())}")
+        # Log selected business for debugging
+        import logging
+        logging.debug(f"Displaying details for business: {business.get('name', 'Unknown')}")
 
         # Basic info
         self.name_label.setText(business.get("name", ""))
@@ -681,8 +666,9 @@ class ResultsPanel(QWidget):
         self.best_practices_progress.setValue(bp_score)
         self.best_practices_progress.setFormat(f"{bp_score}%")
         
-        # Debug: Print the scores being set
-        print(f"Setting scores - Performance: {perf_score}%, SEO: {seo_score}%, Accessibility: {access_score}%, Best Practices: {bp_score}%")
+        # Log score updates
+        import logging
+        logging.debug(f"Updated scores for {business.get('name', 'Unknown')}: Performance={perf_score}%, SEO={seo_score}%, Accessibility={access_score}%, Best Practices={bp_score}%")
 
         # Issues
         issues = business.get("issues", [])
