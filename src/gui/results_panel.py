@@ -50,6 +50,8 @@ class BusinessTableModel(QAbstractTableModel):
             "Priority",
             "Name",
             "Business Type",
+            "Business Size",
+            "Employees",
             "Phone",
             "Email",
             "Website",
@@ -109,29 +111,36 @@ class BusinessTableModel(QAbstractTableModel):
                 # Business Type
                 return business.get("business_type", "")
             elif column == 3:
+                # Business Size
+                return business.get("business_size", "Unknown")
+            elif column == 4:
+                # Employees
+                employee_count = business.get("employee_count", 0)
+                return str(employee_count) if employee_count > 0 else ""
+            elif column == 5:
                 # Phone
                 return business.get("phone", "")
-            elif column == 4:
+            elif column == 6:
                 # Email
                 return business.get("email", "")
-            elif column == 5:
+            elif column == 7:
                 # Website
                 return business.get("website", "")
-            elif column == 6:
+            elif column == 8:
                 # Address
                 return business.get("address", "")
-            elif column == 7:
+            elif column == 9:
                 # Contact Score
                 score = business.get("contact_completeness", 0)
                 return f"{score}%" if score > 0 else ""
-            elif column == 8:
+            elif column == 10:
                 # Social Media
                 social = business.get("social_media", {})
                 if social:
                     platforms = list(social.keys())
                     return ", ".join(platforms[:3])  # Show first 3 platforms
                 return ""
-            elif column == 9:
+            elif column == 11:
                 # Issues
                 issues = business.get("issues", [])
                 if isinstance(issues, list) and issues:
@@ -150,7 +159,7 @@ class BusinessTableModel(QAbstractTableModel):
                 font.setBold(True)
             return font
         elif role == Qt.TextAlignmentRole:
-            if column in [0, 3, 7]:  # Priority, Phone, and Contact Score columns
+            if column in [0, 4, 5, 9]:  # Priority, Employees, Phone, and Contact Score columns
                 return Qt.AlignCenter
             return Qt.AlignLeft | Qt.AlignVCenter
 
@@ -253,10 +262,17 @@ class ResultsPanel(QWidget):
         self.priority_combo.addItems(["All", "High", "Medium", "Low"])
         self.priority_combo.currentIndexChanged.connect(self.on_priority_changed)
 
+        size_label = QLabel("Size:")
+        self.size_combo = QComboBox()
+        self.size_combo.addItems(["All Sizes", "Small", "Medium", "Large", "Enterprise", "Unknown"])
+        self.size_combo.currentIndexChanged.connect(self.on_size_changed)
+
         filter_layout.addWidget(filter_label)
         filter_layout.addWidget(self.filter_edit, 1)
         filter_layout.addWidget(priority_label)
         filter_layout.addWidget(self.priority_combo)
+        filter_layout.addWidget(size_label)
+        filter_layout.addWidget(self.size_combo)
 
         upper_layout.addLayout(filter_layout)
 
@@ -274,7 +290,7 @@ class ResultsPanel(QWidget):
             1, QHeaderView.Stretch
         )  # Name column stretches
         self.table_view.horizontalHeader().setSectionResizeMode(
-            5, QHeaderView.Stretch
+            8, QHeaderView.Stretch
         )  # Address column stretches
         self.table_view.selectionModel().selectionChanged.connect(
             self.on_selection_changed
@@ -452,11 +468,18 @@ class ResultsPanel(QWidget):
         if 0 <= priority_index < self.priority_combo.count():
             self.priority_combo.setCurrentIndex(priority_index)
 
+        size_index = self.settings.value("results/size_filter", 0, int)
+        if 0 <= size_index < self.size_combo.count():
+            self.size_combo.setCurrentIndex(size_index)
+
     def save_settings(self):
         """Save current settings"""
         self.settings.setValue("results/splitter_state", self.splitter.saveState())
         self.settings.setValue(
             "results/priority_filter", self.priority_combo.currentIndex()
+        )
+        self.settings.setValue(
+            "results/size_filter", self.size_combo.currentIndex()
         )
 
     def has_results(self):
@@ -758,6 +781,87 @@ class ResultsPanel(QWidget):
             self.table_view.selectionModel().selectionChanged.connect(
                 self.on_selection_changed
             )
+
+        # Save settings
+        self.save_settings()
+
+    @Slot()
+    def on_size_changed(self, index):
+        """Handle business size filter change"""
+        # Update filter proxy model based on the selected size
+        if index == 0:  # All Sizes
+            # Reset to the default proxy model without custom filtering
+            self.proxy_model = QSortFilterProxyModel()
+            self.proxy_model.setSourceModel(self.model)
+            self.proxy_model.setFilterKeyColumn(-1)  # Search all columns
+            self.proxy_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
+
+            # Apply any existing text filter
+            if self.filter_edit.text():
+                self.proxy_model.setFilterWildcard(self.filter_edit.text())
+
+            self.table_view.setModel(self.proxy_model)
+        else:
+            # Create a custom proxy model for size filtering
+            class SizeProxyModel(QSortFilterProxyModel):
+                def __init__(self, size_value):
+                    super().__init__()
+                    self.size_value = size_value
+                    self.filter_text = ""
+
+                def setFilterWildcard(self, pattern):
+                    self.filter_text = pattern
+                    self.invalidateFilter()
+
+                def filterAcceptsRow(self, source_row, source_parent):
+                    # Get the business data for this row
+                    index = self.sourceModel().index(source_row, 0, source_parent)
+                    business = self.sourceModel().data(index, Qt.UserRole)
+
+                    # Check if size matches
+                    business_size = business.get("business_size", "Unknown")
+                    size_match = business_size == self.size_value
+
+                    # If there's a text filter, apply that too
+                    if self.filter_text:
+                        text_match = False
+
+                        # Check each column for text match
+                        for column in range(self.sourceModel().columnCount()):
+                            source_index = self.sourceModel().index(
+                                source_row, column, source_parent
+                            )
+                            data = str(
+                                self.sourceModel().data(source_index, Qt.DisplayRole)
+                                or ""
+                            )
+
+                            if self.filter_text.lower() in data.lower():
+                                text_match = True
+                                break
+
+                        return size_match and text_match
+
+                    return size_match
+
+            # Determine which size value to filter by
+            size_values = ["Small", "Medium", "Large", "Enterprise", "Unknown"]
+            size_value = size_values[index - 1]  # index 1-5 maps to size_values 0-4
+
+            # Create and apply the proxy model
+            self.proxy_model = SizeProxyModel(size_value)
+            self.proxy_model.setSourceModel(self.model)
+
+            # Apply any existing text filter
+            if self.filter_edit.text():
+                self.proxy_model.setFilterWildcard(self.filter_edit.text())
+
+            self.table_view.setModel(self.proxy_model)
+
+        # Connect selection model signals
+        self.table_view.selectionModel().selectionChanged.connect(
+            self.on_selection_changed
+        )
 
         # Save settings
         self.save_settings()

@@ -346,6 +346,19 @@ class SearchPanel(QWidget):
 
         options_layout.addLayout(priority_layout)
 
+        # Business size filter
+        size_layout = QHBoxLayout()
+        size_label = QLabel("Business Size:")
+        size_layout.addWidget(size_label)
+
+        self.size_combo = QComboBox()
+        self.size_combo.addItems(["All Sizes", "Small", "Medium", "Large", "Enterprise"])
+        self.size_combo.setCurrentText("All Sizes")
+        size_layout.addWidget(self.size_combo)
+        size_layout.addStretch()
+
+        options_layout.addLayout(size_layout)
+
         main_layout.addWidget(options_group)
 
         # Search button and progress bar with modern styling
@@ -386,7 +399,7 @@ class SearchPanel(QWidget):
         # Add stretch at the end
         main_layout.addStretch()
 
-    def start_search(self, location, category, limit, analyze_websites, priority_focus):
+    def start_search(self, location, category, limit, analyze_websites, priority_focus, business_size=None):
         """Start the search process in a background thread"""
         # Update UI
         self.search_button.setEnabled(False)
@@ -400,7 +413,7 @@ class SearchPanel(QWidget):
         # Start search thread
         self.search_thread = threading.Thread(
             target=self.perform_search,
-            args=(location, category, limit, analyze_websites, priority_focus),
+            args=(location, category, limit, analyze_websites, priority_focus, business_size),
         )
         self.search_thread.daemon = True
         self.search_thread.start()
@@ -426,6 +439,12 @@ class SearchPanel(QWidget):
         else:
             self.priority_all_radio.setChecked(True)
 
+        # Load business size filter
+        business_size = self.settings.value("search/business_size", "All Sizes")
+        size_index = self.size_combo.findText(business_size)
+        if size_index >= 0:
+            self.size_combo.setCurrentIndex(size_index)
+
     def save_settings(self):
         """Save current settings"""
         self.settings.setValue("search/last_location", self.location_input.text())
@@ -443,6 +462,9 @@ class SearchPanel(QWidget):
             self.settings.setValue("search/priority_focus", "poor_website")
         else:
             self.settings.setValue("search/priority_focus", "all")
+
+        # Save business size filter
+        self.settings.setValue("search/business_size", self.size_combo.currentText())
 
     def load_business_types(self):
         """Load business types into the category combo box"""
@@ -530,6 +552,11 @@ class SearchPanel(QWidget):
         else:
             priority_focus = "all"
 
+        # Get business size filter
+        business_size = self.size_combo.currentText()
+        if business_size == "All Sizes":
+            business_size = None
+
         # Save to search history
         self.search_history.add_search(location, category)
         
@@ -549,10 +576,10 @@ class SearchPanel(QWidget):
         self.save_settings()
 
         # Start search in a background thread
-        self.start_search(location, category, limit, analyze_websites, priority_focus)
+        self.start_search(location, category, limit, analyze_websites, priority_focus, business_size)
 
     def perform_search(
-        self, location, category, limit, analyze_websites, priority_focus
+        self, location, category, limit, analyze_websites, priority_focus, business_size=None
     ):
         """Perform search operation in the background thread"""
         try:

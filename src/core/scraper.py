@@ -9,6 +9,7 @@ import logging
 from urllib.parse import quote_plus, unquote
 from bs4 import BeautifulSoup
 from .contact_extractor import ContactExtractor
+from ..utils.business_size_detector import BusinessSizeDetector
 
 
 class BusinessScraper:
@@ -34,6 +35,7 @@ class BusinessScraper:
         self.driver = None
         self.use_selenium = use_selenium
         self.contact_extractor = ContactExtractor()
+        self.business_size_detector = BusinessSizeDetector()
         
         if use_selenium:
             self._setup_selenium()
@@ -97,13 +99,22 @@ class BusinessScraper:
         """
         all_businesses = []
         
-        # Define search query
+        # Enhanced location targeting and search query construction
+        location_variants = self._generate_location_variants(location)
+        
+        # Define primary search query with better targeting
         if category:
             search_query = f"{category} in {location}"
         else:
             search_query = f"businesses in {location}"
         
         print(f"Starting search for: {search_query}")
+        print(f"Location variants: {location_variants}")
+        
+        # Validate location is UK-based
+        is_uk_location = self._validate_uk_location(location)
+        if not is_uk_location:
+            print(f"Warning: '{location}' may not be a valid UK location")
         
         # Try UK-specific sources first, then fallback to general sources
         uk_sources = [
@@ -161,18 +172,38 @@ class BusinessScraper:
         
         print(f"Total businesses found: {len(all_businesses)}")
         
-        # If we didn't find any businesses, try a more generic search
+        # If we didn't find any businesses, try enhanced fallback searches
         if not all_businesses and limit > 0:
-            print("No businesses found with specific search. Trying generic search...")
+            print("No businesses found with specific search. Trying enhanced fallback searches...")
             
-            # Try a more generic search without category
-            try:
-                generic_businesses = self._search_google(f"businesses in {location}", limit)
-                if generic_businesses:
-                    all_businesses.extend(generic_businesses[:limit])
-                    print(f"Found {len(generic_businesses)} businesses with generic search")
-            except Exception as e:
-                print(f"Generic search failed: {e}")
+            # Try searches with location variants
+            for variant in location_variants[:3]:  # Try up to 3 variants
+                if len(all_businesses) >= limit:
+                    break
+                    
+                try:
+                    variant_query = f"{category} in {variant}" if category else f"businesses in {variant}"
+                    print(f"Trying variant search: {variant_query}")
+                    
+                    variant_businesses = self._search_google(variant_query, limit - len(all_businesses))
+                    if variant_businesses:
+                        # Filter businesses to ensure they're actually in the target location
+                        filtered_businesses = self._filter_businesses_by_location(variant_businesses, location)
+                        all_businesses.extend(filtered_businesses)
+                        print(f"Found {len(filtered_businesses)} relevant businesses with variant search")
+                        
+                except Exception as e:
+                    print(f"Variant search failed for {variant}: {e}")
+            
+            # Try a more generic search without category as final fallback
+            if not all_businesses:
+                try:
+                    generic_businesses = self._search_google(f"businesses in {location}", limit)
+                    if generic_businesses:
+                        all_businesses.extend(generic_businesses[:limit])
+                        print(f"Found {len(generic_businesses)} businesses with generic search")
+                except Exception as e:
+                    print(f"Generic search failed: {e}")
             
             # Only create placeholder data if absolutely no businesses found and in development mode
             if not all_businesses:
@@ -183,20 +214,23 @@ class BusinessScraper:
                     "Accounting Firm", "Plumbing Services"
                 ]
                 
-                placeholders = [
-                    {
-                        'name': f'{sample_business_types[i % len(sample_business_types)]} - {location}',
-                        'address': f'{random.randint(1, 100)} {random.choice(["High Street", "Main Road", "Church Lane"])}, {location}',
-                        'phone': f'0{random.randint(1000000000, 9999999999)}',
-                        'website': None if i % 3 == 0 else f'https://example-business-{i}.co.uk',
-                        'business_type': sample_business_types[i % len(sample_business_types)],
-                        'source': 'Sample Data',
-                        'priority': random.randint(1, 3),
-                        'notes': 'This is sample data - please perform a new search for real results'
-                    }
-                    for i in range(min(3, limit))  # Reduced to 3 sample entries
-                ]
-                all_businesses.extend(placeholders)
+                # Provide helpful guidance instead of placeholder data
+                print("\n=== SEARCH GUIDANCE ===")
+                print(f"No businesses found for '{search_query}'")
+                print("Possible reasons:")
+                print("1. Location may be misspelled or not recognized")
+                print("2. Category may be too specific")
+                print("3. Network connectivity issues")
+                print("4. Rate limiting from search sources")
+                print("\nSuggestions:")
+                print(f"- Try broader location terms (e.g., nearest city to {location})")
+                print("- Use more general business categories")
+                print("- Check internet connection")
+                print("- Wait a few minutes before retrying")
+                print("=====================\n")
+                
+                # Return empty list instead of placeholder data
+                return []
         
         return all_businesses[:limit]
     
@@ -231,57 +265,83 @@ class BusinessScraper:
         # Enhanced contact extraction for businesses with websites
         if business.get('website'):
             try:
-                contact_data = self.contact_extractor.extract_contact_info(business['website'])
+                enhanced_business = self.contact_extractor.extract_comprehensive_contacts(business)
                 
                 # Merge extracted contact data with existing business data
-                if contact_data:
+                if enhanced_business:
                     # Update phone if not already present or if extracted phone is more complete
-                    if contact_data.get('phone') and (not business.get('phone') or len(contact_data['phone']) > len(business.get('phone', ''))):
-                        business['phone'] = contact_data['phone']
+                    if enhanced_business.get('phone') and (not business.get('phone') or len(enhanced_business['phone']) > len(business.get('phone', ''))):
+                        business['phone'] = enhanced_business['phone']
                     
-                    # Add email if found
-                    if contact_data.get('email'):
-                        business['email'] = contact_data['email']
+                    # Add primary email if found
+                    if enhanced_business.get('primary_email'):
+                        business['email'] = enhanced_business['primary_email']
+                    
+                    # Add all emails
+                    if enhanced_business.get('emails'):
+                        business['emails'] = enhanced_business['emails']
+                    
+                    # Add phone numbers list
+                    if enhanced_business.get('phone_numbers'):
+                        business['phone_numbers'] = enhanced_business['phone_numbers']
                     
                     # Add social media links
-                    if contact_data.get('social_media'):
-                        business['social_media'] = contact_data['social_media']
+                    if enhanced_business.get('social_media'):
+                        business['social_media'] = enhanced_business['social_media']
                     
                     # Update address if extracted address is more complete
-                    if contact_data.get('address') and (not business.get('address') or len(contact_data['address']) > len(business.get('address', ''))):
-                        business['address'] = contact_data['address']
+                    if enhanced_business.get('full_address') and (not business.get('address') or len(enhanced_business['full_address']) > len(business.get('address', ''))):
+                        business['address'] = enhanced_business['full_address']
                         # Re-extract postcode from new address
                         postcode = self._extract_uk_postcode(business['address'])
                         if postcode:
                             business['postal_code'] = postcode
                     
                     # Add opening hours
-                    if contact_data.get('opening_hours'):
-                        business['opening_hours'] = contact_data['opening_hours']
+                    if enhanced_business.get('opening_hours'):
+                        business['opening_hours'] = enhanced_business['opening_hours']
                     
                     # Add business description
-                    if contact_data.get('description'):
-                        business['description'] = contact_data['description']
-                    
-                    # Add business keywords/services
-                    if contact_data.get('keywords'):
-                        business['keywords'] = contact_data['keywords']
+                    if enhanced_business.get('description'):
+                        business['description'] = enhanced_business['description']
                     
                     # Add company registration details
-                    if contact_data.get('company_number'):
-                        business['company_number'] = contact_data['company_number']
+                    if enhanced_business.get('company_number'):
+                        business['company_number'] = enhanced_business['company_number']
                     
-                    if contact_data.get('vat_number'):
-                        business['vat_number'] = contact_data['vat_number']
+                    if enhanced_business.get('vat_number'):
+                        business['vat_number'] = enhanced_business['vat_number']
                     
                     # Add contact completeness score
-                    business['contact_completeness'] = self.contact_extractor.calculate_completeness_score(contact_data)
-                    
-                    print(f"Enhanced contact data for {business['name']}: {business['contact_completeness']}% complete")
+                    if enhanced_business.get('contact_score'):
+                        business['contact_completeness'] = enhanced_business['contact_score']
+                        print(f"Enhanced contact data for {business['name']}: {business['contact_completeness']}% complete")
                     
             except Exception as e:
                 print(f"Error extracting contact data for {business['name']}: {e}")
                 # Continue processing even if contact extraction fails
+        
+        # Detect business size
+        try:
+            size_category, confidence, reasoning = self.business_size_detector.detect_size(business)
+            business['business_size'] = size_category
+            business['size_confidence'] = confidence
+            business['size_reasoning'] = reasoning
+            
+            # Estimate employee count based on size category
+            employee_ranges = {
+                'Small': 25,
+                'Medium': 150,
+                'Large': 500,
+                'Enterprise': 2000
+            }
+            business['employee_count'] = employee_ranges.get(size_category, 25)
+            
+            print(f"Detected business size for {business['name']}: {size_category} (confidence: {confidence}%)")
+        except Exception as e:
+            print(f"Error detecting business size for {business['name']}: {e}")
+            business['business_size'] = 'Unknown'
+            business['employee_count'] = 0
         
         # Set priority based on multiple factors (including contact completeness)
         business['priority'] = self._calculate_business_priority(business)
@@ -417,11 +477,114 @@ class BusinessScraper:
         # UK postcode pattern
         postcode_pattern = r'[A-Z]{1,2}[0-9][0-9A-Z]?\s?[0-9][A-Z]{2}'
         match = re.search(postcode_pattern, text.upper())
+        return match.group(0) if match else None
+    
+    def _generate_location_variants(self, location):
+        """Generate location variants for better search coverage"""
+        variants = [location]
         
-        if match:
-            return match.group(0)
+        # Common UK location patterns
+        location_lower = location.lower()
         
-        return None
+        # Add variants with common suffixes/prefixes
+        if not any(suffix in location_lower for suffix in [' uk', ' england', ' scotland', ' wales']):
+            variants.extend([
+                f"{location}, UK",
+                f"{location}, England",
+                f"{location} UK"
+            ])
+        
+        # Handle common abbreviations
+        abbreviations = {
+            'st ': 'saint ',
+            'st.': 'saint',
+            'upon ': 'on ',
+            'under ': 'under-'
+        }
+        
+        for abbrev, full in abbreviations.items():
+            if abbrev in location_lower:
+                variants.append(location.lower().replace(abbrev, full).title())
+            elif full in location_lower:
+                variants.append(location.lower().replace(full, abbrev).title())
+        
+        # Add nearby major cities for small towns
+        major_cities = {
+            'london': ['greater london', 'london borough'],
+            'manchester': ['greater manchester'],
+            'birmingham': ['west midlands'],
+            'leeds': ['west yorkshire'],
+            'glasgow': ['greater glasgow'],
+            'liverpool': ['merseyside'],
+            'bristol': ['south west england'],
+            'sheffield': ['south yorkshire'],
+            'edinburgh': ['lothian'],
+            'cardiff': ['south wales']
+        }
+        
+        for city, areas in major_cities.items():
+            if city in location_lower:
+                variants.extend(areas)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_variants = []
+        for variant in variants:
+            if variant.lower() not in seen:
+                seen.add(variant.lower())
+                unique_variants.append(variant)
+        
+        return unique_variants
+    
+    def _validate_uk_location(self, location):
+        """Validate if location appears to be UK-based"""
+        location_lower = location.lower()
+        
+        # UK indicators
+        uk_indicators = [
+            'uk', 'england', 'scotland', 'wales', 'northern ireland',
+            'london', 'manchester', 'birmingham', 'leeds', 'glasgow',
+            'liverpool', 'bristol', 'sheffield', 'edinburgh', 'cardiff',
+            'yorkshire', 'lancashire', 'surrey', 'kent', 'essex',
+            'hampshire', 'devon', 'cornwall', 'dorset', 'somerset'
+        ]
+        
+        # Check for UK postcodes pattern
+        uk_postcode_pattern = r'\b[A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2}\b'
+        if re.search(uk_postcode_pattern, location.upper()):
+            return True
+        
+        # Check for UK indicators
+        return any(indicator in location_lower for indicator in uk_indicators)
+    
+    def _filter_businesses_by_location(self, businesses, target_location):
+        """Filter businesses to ensure they're relevant to the target location"""
+        filtered = []
+        target_lower = target_location.lower()
+        
+        for business in businesses:
+            # Check if business address contains target location
+            address = business.get('address', '').lower()
+            
+            # Direct match
+            if target_lower in address:
+                filtered.append(business)
+                continue
+            
+            # Check for partial matches (for compound location names)
+            target_words = target_lower.split()
+            if len(target_words) > 1:
+                if any(word in address for word in target_words if len(word) > 3):
+                    filtered.append(business)
+                    continue
+            
+            # Check business name for location
+            name = business.get('name', '').lower()
+            if target_lower in name:
+                filtered.append(business)
+                continue
+        
+        return filtered
     
     def _search_google_maps(self, query, limit=20):
         """Search for businesses on Google Maps"""

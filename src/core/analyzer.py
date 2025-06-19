@@ -1,118 +1,71 @@
-"""
-Website analyzer module using Lighthouse integration
-"""
+"""Advanced website analyzer module with comprehensive testing capabilities"""
 
 import os
 import json
 import time
-import tempfile
-import subprocess
 import requests
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, WebDriverException
 
 
 class WebsiteAnalyzer:
-    """Website analysis with Lighthouse integration"""
+    """Advanced website analysis with comprehensive testing capabilities"""
 
-    def __init__(self, use_lighthouse=True):
+    def __init__(self, use_selenium=True):
         """
         Initialize the analyzer
 
         Args:
-            use_lighthouse: Whether to attempt to use Lighthouse
+            use_selenium: Whether to use Selenium for advanced testing
         """
-        self.use_lighthouse = use_lighthouse
-        self.lighthouse_available = (
-            self._check_lighthouse() if use_lighthouse else False
-        )
+        self.use_selenium = use_selenium
+        self.driver = None
+        if use_selenium:
+            self._setup_selenium()
 
-    def _check_lighthouse(self):
-        """Check if Lighthouse dependencies are available"""
+    def _setup_selenium(self):
+        """Setup Selenium WebDriver for advanced testing"""
         try:
-            # First check if Node.js is installed
-            try:
-                node_version = subprocess.run(
-                    ["node", "--version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                if node_version.returncode != 0:
-                    print("Node.js not found, installing Lighthouse not possible")
-                    return False
-            except (subprocess.SubprocessError, FileNotFoundError, OSError):
-                print("Node.js not found, installing Lighthouse not possible")
-                return False
-
-            # Then check if npm is installed
-            try:
-                npm_version = subprocess.run(
-                    ["npm", "--version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                if npm_version.returncode != 0:
-                    print("npm not found, installing Lighthouse not possible")
-                    return False
-            except (subprocess.SubprocessError, FileNotFoundError, OSError):
-                print("npm not found, installing Lighthouse not possible")
-                return False
-
-            # Check if Lighthouse is installed globally
-            try:
-                lighthouse_version = subprocess.run(
-                    ["lighthouse", "--version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                if lighthouse_version.returncode != 0:
-                    # Try to install Lighthouse globally
-                    print("Lighthouse not found, attempting to install...")
-                    install_result = subprocess.run(
-                        ["npm", "install", "-g", "lighthouse"],
-                        capture_output=True,
-                        text=True,
-                        timeout=300
-                    )
-                    if install_result.returncode != 0:
-                        print("Failed to install Lighthouse")
-                        return False
-                    print("Lighthouse installed successfully")
-            except Exception as e:
-                print(f"Error checking/installing Lighthouse: {e}")
-                return False
-
-            # Check for Chrome
-            chrome_paths = [
-                os.path.join(
-                    os.environ.get("PROGRAMFILES", "C:\\Program Files"),
-                    "Google\\Chrome\\Application\\chrome.exe",
-                ),
-                os.path.join(
-                    os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"),
-                    "Google\\Chrome\\Application\\chrome.exe",
-                )
+            chrome_options = Options()
+            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
+            
+            # Try to find ChromeDriver
+            chromedriver_paths = [
+                os.path.join(os.getcwd(), 'chromedriver.exe'),
+                os.path.join(os.getcwd(), 'drivers', 'chromedriver.exe'),
+                'chromedriver.exe'  # If in PATH
             ]
-
-            chrome_found = False
-            for path in chrome_paths:
+            
+            driver_path = None
+            for path in chromedriver_paths:
                 if os.path.exists(path):
-                    chrome_found = True
-                    print(f"Chrome found at: {path}")
+                    driver_path = path
                     break
-
-            if not chrome_found:
-                print("Chrome not found, Lighthouse will use bundled Chromium")
-
-            return True
-
+            
+            if driver_path:
+                self.driver = webdriver.Chrome(executable_path=driver_path, options=chrome_options)
+            else:
+                # Try without specifying path (if chromedriver is in PATH)
+                self.driver = webdriver.Chrome(options=chrome_options)
+                
+            print("Selenium WebDriver initialized successfully")
+            
         except Exception as e:
-            print(f"Error during Lighthouse setup: {e}")
-            return False
+            print(f"Failed to initialize Selenium: {e}")
+            self.driver = None
+            self.use_selenium = False
 
     def analyze_website(self, url):
         """
@@ -147,21 +100,16 @@ class WebsiteAnalyzer:
         # First do some basic checks
         self._check_website_basics(url, results)
 
-        # If Lighthouse is available, run it
-        if self.lighthouse_available:
-            print(f"Running Lighthouse analysis for {url}")
-            lighthouse_results = self._run_lighthouse(url)
-            if lighthouse_results:
-                self._process_lighthouse_results(lighthouse_results, results)
-                print(f"Lighthouse analysis completed for {url}")
-            else:
-                print(f"Lighthouse failed for {url}, falling back to basic analysis")
-                self._perform_basic_analysis(url, results)
+        # Perform comprehensive analysis
+        print(f"Running comprehensive website analysis for {url}")
+        self._perform_comprehensive_analysis(url, results)
+        
+        # If Selenium is available, run advanced tests
+        if self.use_selenium and self.driver:
+            print(f"Running advanced Selenium tests for {url}")
+            self._perform_selenium_analysis(url, results)
         else:
-            print(f"Lighthouse not available, using basic analysis for {url}")
-            results["issues"].append("Lighthouse not available for detailed analysis")
-            # Perform basic web checks as fallback
-            self._perform_basic_analysis(url, results)
+            print(f"Selenium not available, using basic analysis only for {url}")
         
         # Debug: Print final scores
         print(f"Analysis results for {url}:")
@@ -234,7 +182,7 @@ class WebsiteAnalyzer:
             self._check_social_media(soup, results)
 
             # Capture screenshot if using Selenium
-            if self.use_lighthouse and hasattr(self, 'driver'):
+            if self.use_selenium and self.driver:
                 self._capture_screenshot(url, results)
 
         except requests.RequestException as e:
@@ -340,287 +288,543 @@ class WebsiteAnalyzer:
         except Exception as e:
             results["issues"].append(f"Failed to capture screenshot: {str(e)}")
 
-    def _run_lighthouse(self, url):
-        """Run Lighthouse analysis on a website using globally installed Lighthouse"""
-        # Create a temporary file for the output
-        fd, output_path = tempfile.mkstemp(suffix=".json")
-        os.close(fd)
-
+    def _perform_selenium_analysis(self, url, results):
+        """Perform advanced analysis using Selenium WebDriver"""
         try:
-            # Run Lighthouse with minimal output categories and use bundled Chromium
-            lighthouse_command = [
-                "lighthouse",
-                url,
-                "--chrome-flags=--headless --no-sandbox --disable-gpu",
-                "--output=json",
-                "--output-path=" + output_path,
-                "--only-categories=performance,accessibility,best-practices,seo",
-                "--quiet",
-                "--form-factor=desktop",  # Force desktop analysis
-                "--throttling.cpuSlowdownMultiplier=2",  # Reduce CPU throttling
-                "--max-wait-for-load=30000"  # 30 second page load timeout
-            ]
-
-            # Run the command with a timeout
-            process = subprocess.run(
-                lighthouse_command,
-                capture_output=True,
-                text=True,
-                timeout=60  # 60 second total timeout
+            # Navigate to the website
+            self.driver.get(url)
+            
+            # Wait for page to load
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
-
-            if process.returncode != 0:
-                print(f"Lighthouse command failed with error: {process.stderr}")
-                return None
-
-            # Check if the output file exists and has content
-            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                try:
-                    # Read and parse the JSON output
-                    with open(output_path, "r", encoding='utf-8') as f:
-                        lighthouse_data = json.load(f)
-                    return lighthouse_data
-                except json.JSONDecodeError as e:
-                    print(f"Error parsing Lighthouse output: {e}")
-                    return None
-            else:
-                print("Lighthouse didn't generate output")
-                return None
-
-        except subprocess.TimeoutExpired:
-            print("Lighthouse analysis timed out")
-            return None
+            
+            # Test mobile responsiveness
+            self._test_mobile_responsiveness(results)
+            
+            # Test interactive elements
+            self._test_interactive_elements(results)
+            
+            # Test form functionality
+            self._test_forms(results)
+            
+            # Test navigation
+            self._test_navigation(results)
+            
+            # Capture screenshot
+            self._capture_screenshot(url, results)
+            
+            # Test page load performance
+            self._test_page_performance(results)
+            
+        except TimeoutException:
+            results["issues"].append("Page took too long to load (>10 seconds)")
+        except WebDriverException as e:
+            results["issues"].append(f"Browser error during testing: {str(e)}")
         except Exception as e:
-            print(f"Error running Lighthouse: {e}")
-            return None
-        finally:
-            # Clean up the temporary file
-            try:
-                if os.path.exists(output_path):
-                    os.unlink(output_path)
-            except Exception as e:
-                print(f"Error cleaning up temporary file: {e}")
-
-
-    def _process_lighthouse_results(self, lighthouse_data, results):
-        """Process Lighthouse results into our format"""
+            results["issues"].append(f"Error during Selenium analysis: {str(e)}")
+    
+    def _test_mobile_responsiveness(self, results):
+        """Test mobile responsiveness using different viewport sizes"""
         try:
-            # Extract category scores
-            categories = lighthouse_data.get("categories", {})
-
-            if "performance" in categories:
-                results["performance_score"] = int(
-                    categories["performance"]["score"] * 100
-                )
-
-            if "accessibility" in categories:
-                results["accessibility_score"] = int(
-                    categories["accessibility"]["score"] * 100
-                )
-
-            if "best-practices" in categories:
-                results["best_practices_score"] = int(
-                    categories["best-practices"]["score"] * 100
-                )
-
-            if "seo" in categories:
-                results["seo_score"] = int(categories["seo"]["score"] * 100)
-
-            # Extract important audits and issues
-            audits = lighthouse_data.get("audits", {})
-
-            # Performance issues
-            if "largest-contentful-paint" in audits:
-                lcp = audits["largest-contentful-paint"]
-                if lcp.get("score", 1) < 0.5:
-                    results["issues"].append(
-                        f"Slow content loading (LCP: {lcp.get('displayValue')})"
-                    )
-
-            if "total-blocking-time" in audits:
-                tbt = audits["total-blocking-time"]
-                if tbt.get("score", 1) < 0.5:
-                    results["issues"].append(
-                        f"Poor interactivity (TBT: {tbt.get('displayValue')})"
-                    )
-
-            if "cumulative-layout-shift" in audits:
-                cls = audits["cumulative-layout-shift"]
-                if cls.get("score", 1) < 0.5:
-                    results["issues"].append(
-                        f"Layout shifts during loading (CLS: {cls.get('displayValue')})"
-                    )
-
-            # SEO issues
-            if "meta-description" in audits:
-                if audits["meta-description"].get("score", 1) < 0.5:
-                    results["issues"].append("Missing meta description")
-
-            if "document-title" in audits:
-                if audits["document-title"].get("score", 1) < 0.5:
-                    results["issues"].append("Missing or poor document title")
-
-            # Additional SEO audits
-            if "link-text" in audits:
-                if audits["link-text"].get("score", 1) < 0.5:
-                    results["issues"].append("Poor or generic link text")
-
-            if "hreflang" in audits:
-                if audits["hreflang"].get("score", 1) < 0.5:
-                    results["issues"].append("Incorrect hreflang links")
-
-            if "canonical" in audits:
-                if audits["canonical"].get("score", 1) < 0.5:
-                    results["issues"].append("Missing canonical link")
-
-            if "robots-txt" in audits:
-                if audits["robots-txt"].get("score", 1) < 0.5:
-                    results["issues"].append("Problems with robots.txt")
-
-            if "structured-data" in audits and "score" in audits["structured-data"]:
-                if audits["structured-data"].get("score", 1) < 0.5:
-                    results["issues"].append("Missing structured data")
-
-            # Accessibility issues
-            if "color-contrast" in audits:
-                if audits["color-contrast"].get("score", 1) < 0.5:
-                    results["issues"].append("Poor color contrast for text")
-
-            if "image-alt" in audits:
-                if audits["image-alt"].get("score", 1) < 0.5:
-                    results["issues"].append("Images missing alt text")
-
-            # Best Practices issues
-            if "is-on-https" in audits:
-                if audits["is-on-https"].get("score", 1) < 0.5:
-                    results["issues"].append("Not using HTTPS")
-
-            if "doctype" in audits:
-                if audits["doctype"].get("score", 1) < 0.5:
-                    results["issues"].append("Missing doctype")
-
+            # Test different screen sizes
+            screen_sizes = [
+                (375, 667),   # iPhone 6/7/8
+                (414, 896),   # iPhone XR
+                (768, 1024),  # iPad
+                (1920, 1080)  # Desktop
+            ]
+            
+            mobile_issues = []
+            
+            for width, height in screen_sizes:
+                self.driver.set_window_size(width, height)
+                time.sleep(1)  # Wait for resize
+                
+                # Check for horizontal scrollbar on mobile
+                if width < 768:  # Mobile sizes
+                    body_width = self.driver.execute_script("return document.body.scrollWidth")
+                    if body_width > width + 10:  # Allow small tolerance
+                        mobile_issues.append(f"Horizontal scroll on {width}px width")
+                
+                # Check if navigation is accessible
+                nav_elements = self.driver.find_elements(By.TAG_NAME, "nav")
+                if nav_elements and width < 768:
+                    # Look for mobile menu toggle
+                    menu_toggles = self.driver.find_elements(By.CSS_SELECTOR, 
+                        "[class*='menu'], [class*='hamburger'], [class*='toggle'], [id*='menu']")
+                    if not menu_toggles:
+                        mobile_issues.append("No mobile menu toggle found")
+            
+            if mobile_issues:
+                results["issues"].extend(mobile_issues)
+                if results["accessibility_score"] > 20:
+                    results["accessibility_score"] -= 15
+            else:
+                # Bonus for good mobile responsiveness
+                results["accessibility_score"] = min(100, results["accessibility_score"] + 10)
+                
         except Exception as e:
-            results["issues"].append(f"Error processing Lighthouse results: {str(e)}")
+            results["issues"].append(f"Error testing mobile responsiveness: {str(e)}")
+    
+    def _test_interactive_elements(self, results):
+        """Test interactive elements like buttons and links"""
+        try:
+            # Test buttons
+            buttons = self.driver.find_elements(By.TAG_NAME, "button")
+            buttons.extend(self.driver.find_elements(By.CSS_SELECTOR, "[role='button']"))
+            
+            for button in buttons[:5]:  # Test first 5 buttons
+                try:
+                    if button.is_displayed() and button.is_enabled():
+                        # Check if button has accessible text
+                        text = button.text or button.get_attribute("aria-label") or button.get_attribute("title")
+                        if not text:
+                            results["issues"].append("Button without accessible text found")
+                            break
+                except Exception:
+                    continue
+            
+            # Test links
+            links = self.driver.find_elements(By.TAG_NAME, "a")
+            empty_links = 0
+            
+            for link in links[:10]:  # Test first 10 links
+                try:
+                    href = link.get_attribute("href")
+                    text = link.text.strip()
+                    
+                    if href and not text and not link.find_elements(By.TAG_NAME, "img"):
+                        empty_links += 1
+                        
+                    if text and text.lower() in ["click here", "read more", "more"]:
+                        results["issues"].append("Generic link text found (poor for accessibility)")
+                        break
+                        
+                except Exception:
+                    continue
+            
+            if empty_links > 2:
+                results["issues"].append(f"{empty_links} empty links found")
+                
+        except Exception as e:
+            results["issues"].append(f"Error testing interactive elements: {str(e)}")
+    
+    def _test_forms(self, results):
+        """Test form accessibility and functionality"""
+        try:
+            forms = self.driver.find_elements(By.TAG_NAME, "form")
+            
+            for form in forms:
+                # Check for labels
+                inputs = form.find_elements(By.CSS_SELECTOR, "input, textarea, select")
+                unlabeled_inputs = 0
+                
+                for input_elem in inputs:
+                    input_type = input_elem.get_attribute("type")
+                    if input_type in ["hidden", "submit", "button"]:
+                        continue
+                        
+                    # Check for label association
+                    input_id = input_elem.get_attribute("id")
+                    aria_label = input_elem.get_attribute("aria-label")
+                    placeholder = input_elem.get_attribute("placeholder")
+                    
+                    has_label = False
+                    if input_id:
+                        labels = self.driver.find_elements(By.CSS_SELECTOR, f"label[for='{input_id}']")
+                        has_label = len(labels) > 0
+                    
+                    if not has_label and not aria_label and not placeholder:
+                        unlabeled_inputs += 1
+                
+                if unlabeled_inputs > 0:
+                    results["issues"].append(f"Form with {unlabeled_inputs} unlabeled inputs found")
+                    if results["accessibility_score"] > 15:
+                        results["accessibility_score"] -= 10
+                        
+        except Exception as e:
+            results["issues"].append(f"Error testing forms: {str(e)}")
+    
+    def _test_navigation(self, results):
+        """Test website navigation structure"""
+        try:
+            # Check for main navigation
+            nav_elements = self.driver.find_elements(By.TAG_NAME, "nav")
+            if not nav_elements:
+                nav_elements = self.driver.find_elements(By.CSS_SELECTOR, "[role='navigation']")
+            
+            if not nav_elements:
+                results["issues"].append("No main navigation found")
+                if results["accessibility_score"] > 10:
+                    results["accessibility_score"] -= 10
+            else:
+                # Check navigation links
+                nav = nav_elements[0]
+                nav_links = nav.find_elements(By.TAG_NAME, "a")
+                
+                if len(nav_links) < 2:
+                    results["issues"].append("Very few navigation links found")
+                elif len(nav_links) > 10:
+                    results["issues"].append("Too many navigation links (may confuse users)")
+            
+            # Check for breadcrumbs
+            breadcrumbs = self.driver.find_elements(By.CSS_SELECTOR, 
+                "[class*='breadcrumb'], [aria-label*='breadcrumb'], nav ol, nav ul")
+            
+            # Check for skip links (accessibility)
+            skip_links = self.driver.find_elements(By.CSS_SELECTOR, 
+                "a[href*='#main'], a[href*='#content'], [class*='skip']")
+            
+            if not skip_links:
+                results["issues"].append("No skip navigation links found (accessibility issue)")
+                
+        except Exception as e:
+            results["issues"].append(f"Error testing navigation: {str(e)}")
+    
+    def _test_page_performance(self, results):
+        """Test page performance metrics using browser APIs"""
+        try:
+            # Get performance timing data
+            perf_data = self.driver.execute_script("""
+                var perf = window.performance;
+                var timing = perf.timing;
+                return {
+                    loadTime: timing.loadEventEnd - timing.navigationStart,
+                    domReady: timing.domContentLoadedEventEnd - timing.navigationStart,
+                    firstPaint: perf.getEntriesByType('paint')[0] ? perf.getEntriesByType('paint')[0].startTime : null,
+                    resourceCount: perf.getEntriesByType('resource').length
+                };
+            """)
+            
+            if perf_data:
+                load_time = perf_data.get('loadTime', 0) / 1000  # Convert to seconds
+                dom_ready = perf_data.get('domReady', 0) / 1000
+                resource_count = perf_data.get('resourceCount', 0)
+                
+                # Update performance score based on metrics
+                if load_time > 5:
+                    results["issues"].append(f"Very slow page load: {load_time:.2f}s")
+                    results["performance_score"] = max(20, results["performance_score"] - 30)
+                elif load_time > 3:
+                    results["issues"].append(f"Slow page load: {load_time:.2f}s")
+                    results["performance_score"] = max(30, results["performance_score"] - 20)
+                
+                if resource_count > 100:
+                    results["issues"].append(f"Too many resources loaded: {resource_count}")
+                    results["performance_score"] = max(25, results["performance_score"] - 15)
+                
+                # Store performance metrics
+                results["performance_metrics"] = {
+                    "load_time": round(load_time, 2),
+                    "dom_ready_time": round(dom_ready, 2),
+                    "resource_count": resource_count
+                }
+                
+        except Exception as e:
+            results["issues"].append(f"Error measuring performance: {str(e)}")
 
-    def _perform_basic_analysis(self, url, results):
-        """Perform basic analysis as a fallback when Lighthouse is not available"""
+    def _perform_comprehensive_analysis(self, url, results):
+        """Perform comprehensive analysis with enhanced checks"""
         try:
             # Get the webpage
-            response = requests.get(url, timeout=10)
-            html = response.text.lower()
-
-            # Check response headers
+            response = requests.get(url, timeout=15, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            })
+            html = response.text
+            html_lower = html.lower()
+            
+            # Parse with BeautifulSoup for better analysis
+            soup = BeautifulSoup(html, 'html.parser')
             headers = response.headers
 
-            # Performance checks - Start with a good baseline
-            performance_score = 75
-            if len(response.content) > 1000000:  # 1MB
-                results["issues"].append("Large page size")
-                performance_score -= 25
-            if results.get("load_time", 0) > 3:
-                performance_score -= 15
-            if results.get("load_time", 0) > 5:
-                performance_score -= 15
-            results["performance_score"] = max(30, performance_score)
-
-            # SEO checks - Start with a good baseline
-            seo_score = 75
-
-            # Check for title
-            if "<title>" not in html or "<title></title>" in html:
-                results["issues"].append("Missing page title")
-                seo_score -= 25
+            # Enhanced Performance checks
+            performance_score = 80
+            self._analyze_performance(response, results, performance_score)
             
-            # Check for meta description
-            if 'meta name="description"' not in html and "meta content=" not in html:
-                results["issues"].append("Missing meta description")
-                seo_score -= 20
+            # Enhanced SEO checks
+            seo_score = 80
+            self._analyze_seo(soup, html_lower, results, seo_score)
             
-            # Check for heading structure
-            if "<h1" not in html:
-                results["issues"].append("Missing H1 heading")
-                seo_score -= 15
+            # Enhanced Accessibility checks
+            accessibility_score = 75
+            self._analyze_accessibility(soup, html_lower, results, accessibility_score)
             
-            # Check for image alt text
-            img_tags = html.count("<img")
-            alt_attributes = html.count("alt=")
-            if img_tags > 0 and alt_attributes < img_tags:
-                results["issues"].append("Some images missing alt text")
-                seo_score -= 10
+            # Enhanced Best practices checks
+            best_practices_score = 75
+            self._analyze_best_practices(soup, headers, html_lower, results, best_practices_score)
             
-            # Check for robots meta tag that blocks indexing
-            if 'meta name="robots" content="noindex' in html:
-                results["issues"].append(
-                    "Page set to noindex - will not appear in search results"
-                )
-                seo_score -= 30
-            
-            # Check for SSL
-            if not results.get("has_ssl", False):
-                seo_score -= 15
-            
-            results["seo_score"] = max(25, seo_score)
-
-            # Accessibility checks - Start with a good baseline
-            accessibility_score = 70
-            
-            # Check for alt text on images
-            if "<img " in html and (' alt="' not in html or " alt=" not in html):
-                results["issues"].append("Images may be missing alt text")
-                accessibility_score -= 20
-            
-            # Check for form labels
-            if "<form" in html and "<label" not in html:
-                results["issues"].append("Forms may be missing labels")
-                accessibility_score -= 15
-            
-            # Check for proper heading hierarchy
-            if "<h1" in html and "<h2" in html:
-                accessibility_score += 5  # Bonus for good structure
-            
-            results["accessibility_score"] = max(30, accessibility_score)
-
-            # Best practices checks - Start with a good baseline
-            best_practices_score = 70
-            
-            # Check for HTTPS
-            if results.get("has_ssl", False):
-                best_practices_score += 10
-            else:
-                best_practices_score -= 20
-            
-            # Check for basic security headers
-            security_headers = [
-                "Strict-Transport-Security",
-                "Content-Security-Policy", 
-                "X-Content-Type-Options",
-            ]
-            missing_headers = [h for h in security_headers if h not in headers]
-            
-            if missing_headers:
-                results["issues"].append(
-                    f"Missing security headers: {', '.join(missing_headers)}"
-                )
-                best_practices_score -= (len(missing_headers) * 8)
-            
-            # Check for JavaScript libraries with known vulnerabilities
-            risky_js_libs = ["jquery-1.", "jquery-2.0", "angular.js@1.", "bootstrap-2"]
-            for risky_lib in risky_js_libs:
-                if risky_lib in html:
-                    results["issues"].append(
-                        f"Using potentially outdated library: {risky_lib}"
-                    )
-                    best_practices_score -= 15
-                    break
-            
-            # Check for proper doctype
-            if "<!doctype html>" in html or "<!DOCTYPE html>" in response.text:
-                best_practices_score += 5
-            
-            results["best_practices_score"] = max(25, best_practices_score)
+            # Additional comprehensive checks
+            self._analyze_content_quality(soup, results)
+            self._analyze_technical_seo(soup, url, results)
+            self._analyze_user_experience(soup, results)
 
         except Exception as e:
-            results["issues"].append(f"Error during basic analysis: {str(e)}")
+            results["issues"].append(f"Error during comprehensive analysis: {str(e)}")
+    
+    def _analyze_performance(self, response, results, base_score):
+        """Analyze website performance metrics"""
+        performance_score = base_score
+        
+        # Page size analysis
+        page_size_mb = len(response.content) / (1024 * 1024)
+        if page_size_mb > 5:
+            results["issues"].append(f"Very large page size: {page_size_mb:.1f}MB")
+            performance_score -= 30
+        elif page_size_mb > 2:
+            results["issues"].append(f"Large page size: {page_size_mb:.1f}MB")
+            performance_score -= 15
+        
+        # Load time analysis
+        load_time = results.get("load_time", 0)
+        if load_time > 5:
+            results["issues"].append(f"Very slow load time: {load_time:.2f}s")
+            performance_score -= 25
+        elif load_time > 3:
+            results["issues"].append(f"Slow load time: {load_time:.2f}s")
+            performance_score -= 15
+        
+        # Check for compression
+        if 'gzip' not in response.headers.get('Content-Encoding', '') and \
+           'br' not in response.headers.get('Content-Encoding', ''):
+            results["issues"].append("No compression detected (gzip/brotli)")
+            performance_score -= 10
+        
+        # Check for caching headers
+        cache_headers = ['Cache-Control', 'ETag', 'Last-Modified', 'Expires']
+        if not any(header in response.headers for header in cache_headers):
+            results["issues"].append("No caching headers found")
+            performance_score -= 10
+        
+        results["performance_score"] = max(20, performance_score)
+    
+    def _analyze_seo(self, soup, html_lower, results, base_score):
+        """Analyze SEO factors"""
+        seo_score = base_score
+        
+        # Title analysis
+        title_tag = soup.find('title')
+        if not title_tag or not title_tag.text.strip():
+            results["issues"].append("Missing or empty page title")
+            seo_score -= 25
+        else:
+            title_length = len(title_tag.text)
+            if title_length < 30:
+                results["issues"].append("Page title too short (< 30 characters)")
+                seo_score -= 10
+            elif title_length > 60:
+                results["issues"].append("Page title too long (> 60 characters)")
+                seo_score -= 10
+        
+        # Meta description analysis
+        meta_desc = soup.find('meta', {'name': 'description'})
+        if not meta_desc or not meta_desc.get('content', '').strip():
+            results["issues"].append("Missing meta description")
+            seo_score -= 20
+        else:
+            desc_length = len(meta_desc.get('content', ''))
+            if desc_length < 120:
+                results["issues"].append("Meta description too short (< 120 characters)")
+                seo_score -= 10
+            elif desc_length > 160:
+                results["issues"].append("Meta description too long (> 160 characters)")
+                seo_score -= 10
+        
+        # Heading structure analysis
+        h1_tags = soup.find_all('h1')
+        if not h1_tags:
+            results["issues"].append("Missing H1 heading")
+            seo_score -= 20
+        elif len(h1_tags) > 1:
+            results["issues"].append("Multiple H1 headings found")
+            seo_score -= 15
+        
+        # Check heading hierarchy
+        headings = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+        if len(headings) < 3:
+            results["issues"].append("Poor heading structure (< 3 headings)")
+            seo_score -= 10
+        
+        # Image alt text analysis
+        images = soup.find_all('img')
+        images_without_alt = [img for img in images if not img.get('alt')]
+        if images_without_alt:
+            percentage = (len(images_without_alt) / len(images)) * 100 if images else 0
+            results["issues"].append(f"{len(images_without_alt)} images missing alt text ({percentage:.0f}%)")
+            seo_score -= min(20, percentage // 10 * 5)
+        
+        # Internal linking
+        internal_links = soup.find_all('a', href=True)
+        if len(internal_links) < 5:
+            results["issues"].append("Very few internal links found")
+            seo_score -= 10
+        
+        # Check for SSL
+        if not results.get("has_ssl", False):
+            seo_score -= 15
+        
+        results["seo_score"] = max(20, seo_score)
+    
+    def _analyze_accessibility(self, soup, html_lower, results, base_score):
+        """Analyze accessibility factors"""
+        accessibility_score = base_score
+        
+        # Form accessibility
+        forms = soup.find_all('form')
+        for form in forms:
+            inputs = form.find_all(['input', 'textarea', 'select'])
+            unlabeled_inputs = 0
+            
+            for input_elem in inputs:
+                input_type = input_elem.get('type', '')
+                if input_type in ['hidden', 'submit', 'button']:
+                    continue
+                
+                input_id = input_elem.get('id')
+                aria_label = input_elem.get('aria-label')
+                
+                # Check for associated label
+                has_label = False
+                if input_id:
+                    labels = soup.find_all('label', {'for': input_id})
+                    has_label = len(labels) > 0
+                
+                if not has_label and not aria_label:
+                    unlabeled_inputs += 1
+            
+            if unlabeled_inputs > 0:
+                results["issues"].append(f"Form with {unlabeled_inputs} unlabeled inputs")
+                accessibility_score -= 15
+        
+        # Check for skip links
+        skip_links = soup.find_all('a', href=re.compile(r'#(main|content|skip)'))
+        if not skip_links:
+            results["issues"].append("No skip navigation links found")
+            accessibility_score -= 10
+        
+        # Check for ARIA landmarks
+        landmarks = soup.find_all(attrs={'role': re.compile(r'(main|navigation|banner|contentinfo)')})
+        if len(landmarks) < 2:
+            results["issues"].append("Few or no ARIA landmarks found")
+            accessibility_score -= 10
+        
+        # Check for focus indicators (basic check)
+        if ':focus' not in html_lower and 'outline' not in html_lower:
+            results["issues"].append("No focus indicators detected in CSS")
+            accessibility_score -= 10
+        
+        results["accessibility_score"] = max(25, accessibility_score)
+    
+    def _analyze_best_practices(self, soup, headers, html_lower, results, base_score):
+        """Analyze best practices"""
+        best_practices_score = base_score
+        
+        # Security headers
+        security_headers = {
+            'Strict-Transport-Security': 'HSTS header missing',
+            'Content-Security-Policy': 'CSP header missing',
+            'X-Content-Type-Options': 'X-Content-Type-Options missing',
+            'X-Frame-Options': 'X-Frame-Options missing',
+            'Referrer-Policy': 'Referrer-Policy missing'
+        }
+        
+        missing_headers = []
+        for header, message in security_headers.items():
+            if header not in headers:
+                missing_headers.append(message)
+                best_practices_score -= 8
+        
+        if missing_headers:
+            results["issues"].append(f"Security issues: {', '.join(missing_headers[:3])}")
+        
+        # Check for outdated libraries
+        risky_patterns = [
+            (r'jquery[/-]1\.[0-7]', 'Outdated jQuery version'),
+            (r'bootstrap[/-]2\.', 'Outdated Bootstrap version'),
+            (r'angular\.js@1\.[0-5]', 'Outdated AngularJS version')
+        ]
+        
+        for pattern, message in risky_patterns:
+            if re.search(pattern, html_lower):
+                results["issues"].append(message)
+                best_practices_score -= 15
+                break
+        
+        # Check for proper doctype
+        if not str(soup).startswith('<!DOCTYPE html>'):
+            results["issues"].append("Missing or incorrect DOCTYPE")
+            best_practices_score -= 10
+        
+        # Check for HTTPS
+        if results.get("has_ssl", False):
+            best_practices_score += 5
+        else:
+            best_practices_score -= 20
+        
+        # Check for mixed content
+        if results.get("has_ssl", False) and 'http://' in html_lower:
+            results["issues"].append("Mixed content detected (HTTP resources on HTTPS page)")
+            best_practices_score -= 15
+        
+        results["best_practices_score"] = max(20, best_practices_score)
+    
+    def _analyze_content_quality(self, soup, results):
+        """Analyze content quality factors"""
+        # Word count analysis
+        text_content = soup.get_text()
+        word_count = len(text_content.split())
+        
+        if word_count < 300:
+            results["issues"].append(f"Low content volume: {word_count} words")
+        
+        # Check for duplicate content indicators
+        paragraphs = soup.find_all('p')
+        if len(set(p.get_text() for p in paragraphs)) < len(paragraphs) * 0.8:
+            results["issues"].append("Potential duplicate content detected")
+    
+    def _analyze_technical_seo(self, soup, url, results):
+        """Analyze technical SEO factors"""
+        # Check for canonical URL
+        canonical = soup.find('link', {'rel': 'canonical'})
+        if not canonical:
+            results["issues"].append("Missing canonical URL")
+        
+        # Check for Open Graph tags
+        og_tags = soup.find_all('meta', {'property': re.compile(r'^og:')})
+        if len(og_tags) < 3:
+            results["issues"].append("Few or missing Open Graph tags")
+        
+        # Check for structured data
+        json_ld = soup.find_all('script', {'type': 'application/ld+json'})
+        microdata = soup.find_all(attrs={'itemtype': True})
+        if not json_ld and not microdata:
+            results["issues"].append("No structured data found")
+    
+    def _analyze_user_experience(self, soup, results):
+        """Analyze user experience factors"""
+        # Check for contact information
+        contact_indicators = ['contact', 'phone', 'email', 'address']
+        page_text = soup.get_text().lower()
+        
+        contact_found = any(indicator in page_text for indicator in contact_indicators)
+        if not contact_found:
+            results["issues"].append("No obvious contact information found")
+        
+        # Check for search functionality
+        search_inputs = soup.find_all('input', {'type': 'search'})
+        search_forms = soup.find_all('form', class_=re.compile(r'search', re.I))
+        if not search_inputs and not search_forms:
+            results["issues"].append("No search functionality detected")
+    
+    def cleanup(self):
+        """Clean up resources"""
+        if self.driver:
+            try:
+                self.driver.quit()
+            except Exception as e:
+                print(f"Error closing WebDriver: {e}")
+            finally:
+                self.driver = None
 
     def _calculate_priority(self, results):
         """

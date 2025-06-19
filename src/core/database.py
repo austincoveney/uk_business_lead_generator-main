@@ -46,6 +46,8 @@ class LeadDatabase:
                 email TEXT,
                 website TEXT,
                 business_type TEXT,
+                business_size TEXT DEFAULT 'Unknown',  -- Small, Medium, Large, Enterprise, Unknown
+                employee_count INTEGER DEFAULT 0,
                 priority INTEGER DEFAULT 0,
                 notes TEXT,
                 discovered_date TEXT,
@@ -60,6 +62,14 @@ class LeadDatabase:
                 address_verified BOOLEAN DEFAULT 1
             )
             ''')
+            
+            # Add business_size column to existing tables if it doesn't exist
+            try:
+                cursor.execute('ALTER TABLE businesses ADD COLUMN business_size TEXT DEFAULT "Unknown"')
+                cursor.execute('ALTER TABLE businesses ADD COLUMN employee_count INTEGER DEFAULT 0')
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
             
             # Website metrics table
             cursor.execute('''
@@ -115,10 +125,10 @@ class LeadDatabase:
             cursor.execute('''
             INSERT INTO businesses (
                 name, address, city, postal_code, phone, email, website, 
-                business_type, priority, notes, discovered_date, last_updated,
+                business_type, business_size, employee_count, priority, notes, discovered_date, last_updated,
                 social_media, opening_hours, description, keywords,
                 company_number, vat_number, contact_completeness, address_verified
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 business_data.get('name', ''),
                 business_data.get('address', ''),
@@ -128,6 +138,8 @@ class LeadDatabase:
                 business_data.get('email', ''),
                 business_data.get('website', ''),
                 business_data.get('business_type', ''),
+                business_data.get('business_size', 'Unknown'),
+                business_data.get('employee_count', 0),
                 business_data.get('priority', 0),
                 business_data.get('notes', ''),
                 now,
@@ -235,13 +247,15 @@ class LeadDatabase:
             print(f"Error retrieving business: {e}")
             return None
     
-    def get_all_businesses(self, priority=None, search_term=None):
+    def get_all_businesses(self, priority=None, search_term=None, business_size=None, business_type=None):
         """
         Get all businesses, optionally filtered
         
         Args:
             priority: Optional priority filter (1, 2, or 3)
             search_term: Optional search term for name/address
+            business_size: Optional business size filter (Small, Medium, Large, Enterprise)
+            business_type: Optional business type filter
             
         Returns:
             List of business dictionaries
@@ -274,6 +288,14 @@ class LeadDatabase:
                 ''')
                 search_pattern = f"%{search_term}%"
                 params.extend([search_pattern, search_pattern, search_pattern, search_pattern])
+                
+            if business_size and business_size != 'All':
+                where_clauses.append("b.business_size = ?")
+                params.append(business_size)
+                
+            if business_type and business_type != 'All':
+                where_clauses.append("b.business_type LIKE ?")
+                params.append(f"%{business_type}%")
             
             if where_clauses:
                 query += " WHERE " + " AND ".join(where_clauses)
@@ -336,7 +358,7 @@ class LeadDatabase:
             
             fields = [
                 'name', 'address', 'city', 'postal_code', 'phone', 
-                'email', 'website', 'business_type', 'priority', 'notes',
+                'email', 'website', 'business_type', 'business_size', 'employee_count', 'priority', 'notes',
                 'social_media', 'opening_hours', 'description', 'keywords',
                 'company_number', 'vat_number', 'contact_completeness', 'address_verified'
             ]
