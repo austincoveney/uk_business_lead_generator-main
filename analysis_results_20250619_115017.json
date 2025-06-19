@@ -1,0 +1,11 @@
+{
+  "https://www.bbc.co.uk": {
+    "error": "'WebsiteAnalyzer' object has no attribute 'analyze'"
+  },
+  "https://www.gov.uk": {
+    "error": "'WebsiteAnalyzer' object has no attribute 'analyze'"
+  },
+  "https://www.example.com": {
+    "error": "'WebsiteAnalyzer' object has no attribute 'analyze'"
+  }
+}

@@ -108,8 +108,18 @@ class WebsiteAnalyzer:
         if self.use_selenium and self.driver:
             print(f"Running advanced Selenium tests for {url}")
             self._perform_selenium_analysis(url, results)
+            self._measure_core_web_vitals(results)
         else:
             print(f"Selenium not available, using basic analysis only for {url}")
+        
+        # Perform advanced SEO and accessibility analysis
+        try:
+            response = requests.get(url, timeout=10)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            self._analyze_advanced_seo(soup, results)
+            self._analyze_accessibility_advanced(soup, results)
+        except Exception as e:
+            results["issues"].append(f"Error in advanced analysis: {str(e)}")
         
         # Debug: Print final scores
         print(f"Analysis results for {url}:")
@@ -279,14 +289,275 @@ class WebsiteAnalyzer:
                     results["social_media_presence"].append(platform)
 
     def _capture_screenshot(self, url, results):
-        """Capture website screenshot using Selenium"""
+        """Capture enhanced website screenshots using Selenium"""
         try:
             self.driver.get(url)
             time.sleep(2)  # Wait for page to load
-            screenshot = self.driver.get_screenshot_as_base64()
-            results["screenshot"] = screenshot
+            
+            screenshots = {}
+            
+            # Desktop full page screenshot
+            self.driver.set_window_size(1920, 1080)
+            time.sleep(1)
+            screenshots['desktop_full'] = self.driver.get_screenshot_as_base64()
+            
+            # Desktop above-the-fold
+            self.driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(0.5)
+            screenshots['desktop_above_fold'] = self.driver.get_screenshot_as_base64()
+            
+            # Mobile view
+            self.driver.set_window_size(375, 667)
+            time.sleep(1)
+            self.driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(0.5)
+            screenshots['mobile'] = self.driver.get_screenshot_as_base64()
+            
+            # Tablet view
+            self.driver.set_window_size(768, 1024)
+            time.sleep(1)
+            self.driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(0.5)
+            screenshots['tablet'] = self.driver.get_screenshot_as_base64()
+            
+            # Store all screenshots
+            results["screenshots"] = screenshots
+            # Keep backward compatibility
+            results["screenshot"] = screenshots.get('desktop_full', '')
+            
         except Exception as e:
             results["issues"].append(f"Failed to capture screenshot: {str(e)}")
+    
+    def _measure_core_web_vitals(self, results):
+        """Measure Core Web Vitals using JavaScript"""
+        try:
+            # Measure Largest Contentful Paint (LCP)
+            lcp_script = """
+            return new Promise((resolve) => {
+                new PerformanceObserver((entryList) => {
+                    const entries = entryList.getEntries();
+                    const lastEntry = entries[entries.length - 1];
+                    resolve(lastEntry ? lastEntry.startTime : 0);
+                }).observe({entryTypes: ['largest-contentful-paint']});
+                
+                setTimeout(() => resolve(0), 5000);
+            });
+            """
+            
+            # Measure First Input Delay (FID) - approximated with event timing
+            fid_script = """
+            return new Promise((resolve) => {
+                new PerformanceObserver((entryList) => {
+                    const entries = entryList.getEntries();
+                    const firstEntry = entries[0];
+                    resolve(firstEntry ? firstEntry.processingStart - firstEntry.startTime : 0);
+                }).observe({entryTypes: ['first-input']});
+                
+                setTimeout(() => resolve(0), 5000);
+            });
+            """
+            
+            # Measure Cumulative Layout Shift (CLS)
+            cls_script = """
+            return new Promise((resolve) => {
+                let clsValue = 0;
+                new PerformanceObserver((entryList) => {
+                    for (const entry of entryList.getEntries()) {
+                        if (!entry.hadRecentInput) {
+                            clsValue += entry.value;
+                        }
+                    }
+                }).observe({entryTypes: ['layout-shift']});
+                
+                setTimeout(() => resolve(clsValue), 5000);
+            });
+            """
+            
+            # Execute measurements
+            try:
+                lcp = self.driver.execute_async_script(lcp_script)
+                fid = self.driver.execute_async_script(fid_script)
+                cls = self.driver.execute_async_script(cls_script)
+                
+                core_web_vitals = {
+                    'lcp': lcp,  # Should be < 2.5s
+                    'fid': fid,  # Should be < 100ms
+                    'cls': cls   # Should be < 0.1
+                }
+                
+                results['core_web_vitals'] = core_web_vitals
+                
+                # Evaluate Core Web Vitals and add to issues
+                if lcp > 2500:  # 2.5 seconds
+                    results['issues'].append(f"Poor Largest Contentful Paint: {lcp/1000:.2f}s (should be < 2.5s)")
+                if fid > 100:  # 100ms
+                    results['issues'].append(f"Poor First Input Delay: {fid:.0f}ms (should be < 100ms)")
+                if cls > 0.1:
+                    results['issues'].append(f"Poor Cumulative Layout Shift: {cls:.3f} (should be < 0.1)")
+                    
+                # Adjust performance score based on Core Web Vitals
+                vitals_score = 100
+                if lcp > 2500: vitals_score -= 30
+                elif lcp > 1500: vitals_score -= 15
+                if fid > 100: vitals_score -= 25
+                elif fid > 50: vitals_score -= 10
+                if cls > 0.1: vitals_score -= 25
+                elif cls > 0.05: vitals_score -= 10
+                
+                results['performance_score'] = max(0, min(100, (results.get('performance_score', 50) + vitals_score) // 2))
+                
+            except Exception as script_error:
+                results['issues'].append(f"Could not measure Core Web Vitals: {str(script_error)}")
+                
+        except Exception as e:
+            results['issues'].append(f"Error measuring Core Web Vitals: {str(e)}")
+    
+    def _analyze_advanced_seo(self, soup, results):
+        """Perform advanced SEO analysis"""
+        try:
+            seo_score = results.get('seo_score', 50)
+            
+            # Check for Schema markup
+            schema_scripts = soup.find_all('script', {'type': 'application/ld+json'})
+            if schema_scripts:
+                results['has_schema_markup'] = True
+                seo_score += 10
+                try:
+                    # Validate JSON-LD
+                    for script in schema_scripts:
+                        json.loads(script.string or '{}')
+                except json.JSONDecodeError:
+                    results['issues'].append('Invalid Schema markup detected')
+                    seo_score -= 5
+            else:
+                results['has_schema_markup'] = False
+                results['issues'].append('No Schema markup found')
+            
+            # Check canonical URL
+            canonical = soup.find('link', {'rel': 'canonical'})
+            if canonical and canonical.get('href'):
+                results['has_canonical'] = True
+                seo_score += 5
+            else:
+                results['has_canonical'] = False
+                results['issues'].append('No canonical URL specified')
+            
+            # Check Open Graph tags
+            og_tags = soup.find_all('meta', {'property': lambda x: x and x.startswith('og:')})
+            if len(og_tags) >= 3:  # At least title, description, image
+                results['has_open_graph'] = True
+                seo_score += 8
+            else:
+                results['has_open_graph'] = False
+                results['issues'].append('Incomplete Open Graph tags')
+            
+            # Check Twitter Card tags
+            twitter_tags = soup.find_all('meta', {'name': lambda x: x and x.startswith('twitter:')})
+            if twitter_tags:
+                results['has_twitter_cards'] = True
+                seo_score += 5
+            else:
+                results['has_twitter_cards'] = False
+                results['issues'].append('No Twitter Card tags found')
+            
+            # Analyze heading structure
+            headings = {}
+            for i in range(1, 7):
+                headings[f'h{i}'] = len(soup.find_all(f'h{i}'))
+            
+            results['heading_structure'] = headings
+            
+            # Check for proper heading hierarchy
+            if headings['h1'] == 0:
+                results['issues'].append('No H1 tag found')
+                seo_score -= 15
+            elif headings['h1'] > 1:
+                results['issues'].append('Multiple H1 tags found')
+                seo_score -= 10
+            
+            # Check for alt text on images
+            images = soup.find_all('img')
+            images_without_alt = [img for img in images if not img.get('alt')]
+            if images_without_alt:
+                results['issues'].append(f'{len(images_without_alt)} images missing alt text')
+                seo_score -= min(20, len(images_without_alt) * 2)
+            
+            # Check internal linking
+            internal_links = soup.find_all('a', href=True)
+            internal_count = len([link for link in internal_links if not link['href'].startswith(('http', 'mailto:', 'tel:'))])
+            results['internal_links_count'] = internal_count
+            
+            if internal_count < 3:
+                results['issues'].append('Very few internal links found')
+                seo_score -= 5
+            
+            results['seo_score'] = max(0, min(100, seo_score))
+            
+        except Exception as e:
+            results['issues'].append(f'Error in advanced SEO analysis: {str(e)}')
+    
+    def _analyze_accessibility_advanced(self, soup, results):
+        """Perform advanced accessibility analysis"""
+        try:
+            accessibility_score = results.get('accessibility_score', 50)
+            
+            # Check for ARIA landmarks
+            landmarks = soup.find_all(attrs={'role': True})
+            landmark_roles = [elem.get('role') for elem in landmarks]
+            
+            required_landmarks = ['main', 'navigation', 'banner', 'contentinfo']
+            missing_landmarks = [role for role in required_landmarks if role not in landmark_roles]
+            
+            if missing_landmarks:
+                results['issues'].append(f'Missing ARIA landmarks: {", ".join(missing_landmarks)}')
+                accessibility_score -= len(missing_landmarks) * 5
+            else:
+                accessibility_score += 10
+            
+            # Check for skip links
+            skip_links = soup.find_all('a', href=lambda x: x and x.startswith('#'))
+            skip_link_texts = [link.get_text().lower() for link in skip_links]
+            has_skip_to_content = any('skip' in text and 'content' in text for text in skip_link_texts)
+            
+            if has_skip_to_content:
+                accessibility_score += 5
+            else:
+                results['issues'].append('No "skip to content" link found')
+            
+            # Check form labels
+            forms = soup.find_all('form')
+            for form in forms:
+                inputs = form.find_all(['input', 'textarea', 'select'])
+                for input_elem in inputs:
+                    input_id = input_elem.get('id')
+                    input_type = input_elem.get('type', '')
+                    
+                    if input_type not in ['hidden', 'submit', 'button']:
+                        # Check for associated label
+                        label = None
+                        if input_id:
+                            label = soup.find('label', {'for': input_id})
+                        
+                        if not label and not input_elem.get('aria-label') and not input_elem.get('placeholder'):
+                            results['issues'].append('Form input without proper label found')
+                            accessibility_score -= 5
+                            break
+            
+            # Check for focus indicators (basic check)
+            css_text = ''
+            style_tags = soup.find_all('style')
+            for style in style_tags:
+                if style.string:
+                    css_text += style.string
+            
+            if ':focus' not in css_text.lower():
+                results['issues'].append('No custom focus styles detected')
+                accessibility_score -= 5
+            
+            results['accessibility_score'] = max(0, min(100, accessibility_score))
+            
+        except Exception as e:
+            results['issues'].append(f'Error in accessibility analysis: {str(e)}')
 
     def _perform_selenium_analysis(self, url, results):
         """Perform advanced analysis using Selenium WebDriver"""
